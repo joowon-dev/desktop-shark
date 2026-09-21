@@ -62,9 +62,14 @@ export function verifyCode(playerId, secret) {
 /**
  * 밥을 준 횟수를 올린다. **단계는 안 보낸다** — 서버가 문턱을 보고 매긴다.
  * count 는 오프라인에서 밀린 것을 한꺼번에 흘려보내기 위한 것이고 한 번에 20까지.
+ *
+ * 종(species)은 보낸다. **점수가 아니라 생김새라서** 클라이언트가 알려 줘도 되고,
+ * 랭킹에 실루엣을 그리려면 서버가 알아야 한다. 모르는 종이면 서버가 조용히 무시한다.
  */
-export function feedShark(playerId, secret, count = 1) {
-  return rpc('feed_shark', { p_player: playerId, p_secret: secret, p_count: count })
+export function feedShark(playerId, secret, count = 1, species = null) {
+  return rpc('feed_shark', {
+    p_player: playerId, p_secret: secret, p_count: count, p_species: species,
+  })
 }
 
 /** 상위 몇 명. **기간 탭이 없다** — 성장은 쌓이기만 해서 「오늘의 성장」은 뜻이 없다. */

@@ -3,7 +3,7 @@ import {
   createEngine, feedAt, feedTyped, mouthOf, setGameMode, snapshot, step,
 } from '../src/game/engine.js'
 import {
-  DT, EAT_RADIUS, EAT_REACH, FOOD_KINDS, MAX_FOOD, TYPE_FEED_INTERVAL,
+  DT, EAT_RADIUS, EAT_REACH, FOOD_KINDS, MAX_FOOD, TAIL_MAX_SWING, TYPE_FEED_INTERVAL,
 } from '../src/game/constants.js'
 
 const bounds = { w: 16 / 9, h: 1 }
@@ -342,5 +342,64 @@ describe('결정론', () => {
       return { x: e.swimmer.x, y: e.swimmer.y, eaten: e.eaten, state: e.brain.state }
     }
     expect(run()).toEqual(run())
+  })
+})
+
+describe('꼬리', () => {
+  // **이게 「빠르게 헤엄칠 때 꼬리가 부자연스럽다」의 정체였다.**
+  // 예전에는 위상을 `elapsed * (6 + speed * 30)` 으로 구했다. 속력이 바뀌면 지나간
+  // 시간 전체의 위상이 한꺼번에 다시 계산되어 꼬리가 순간이동한다.
+  it('속력이 갑자기 바뀌어도 위상이 튀지 않는다', () => {
+    let e = createEngine({ eaten: 0, lastFedAt: 0, seed: 3, bounds, now: 0 })
+    let now = 0
+
+    // 한참 느리게 헤엄치게 둔다 — 튐은 「지나간 시간」이 길수록 커진다.
+    for (let i = 0; i < 60 * 120; i += 1) {
+      now += DT * 1000
+      e = step(e, now, DT)
+    }
+
+    // 여기서 돌진시킨다.
+    e = feedAt(e, bounds.w * 0.5, 0.5)
+
+    let previous = e.tailPhase
+    let biggest = 0
+    for (let i = 0; i < 60 * 10; i += 1) {
+      now += DT * 1000
+      e = step(e, now, DT)
+      biggest = Math.max(biggest, Math.abs(e.tailPhase - previous))
+      previous = e.tailPhase
+    }
+
+    // 한 프레임에 젓는 각도는 제일 빨라도 (5.5 + 0.22×26) / 60 ≈ 0.19 라디안이다.
+    // 0.4 를 넘으면 위상이 건너뛴 것이다.
+    expect(biggest, `한 프레임에 ${biggest.toFixed(2)} 라디안이나 건너뛰었다`)
+      .toBeLessThan(0.4)
+  })
+
+  it('위상은 뒤로 가지 않는다', () => {
+    let e = createEngine({ eaten: 0, lastFedAt: null, seed: 9, bounds, now: 0 })
+    let now = 0
+    let previous = e.tailPhase
+    for (let i = 0; i < 60 * 60; i += 1) {
+      now += DT * 1000
+      e = step(e, now, DT)
+      expect(e.tailPhase).toBeGreaterThanOrEqual(previous)
+      previous = e.tailPhase
+    }
+  })
+
+  it('빠를수록 자주, 크게 젓는다', () => {
+    const slow = { ...createEngine({ bounds, now: 0 }), swimmer: { x: 0.5, y: 0.5, heading: 0, speed: 0.02 } }
+    const fast = { ...createEngine({ bounds, now: 0 }), swimmer: { x: 0.5, y: 0.5, heading: 0, speed: 0.22 } }
+    expect(snapshot(fast).tailSwing).toBeGreaterThan(snapshot(slow).tailSwing)
+
+    const after = (e) => step(e, 1000, DT).tailPhase
+    expect(after(fast)).toBeGreaterThan(after(slow))
+  })
+
+  it('젓는 폭에 상한이 있다 — 아무리 빨라도 몸이 접히면 안 된다', () => {
+    const crazy = { ...createEngine({ bounds, now: 0 }), swimmer: { x: 0.5, y: 0.5, heading: 0, speed: 99 } }
+    expect(snapshot(crazy).tailSwing).toBe(TAIL_MAX_SWING)
   })
 })

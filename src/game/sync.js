@@ -47,11 +47,11 @@ export function newSecret(randomBytes) {
   return out
 }
 
-/** 이름을 안 정했을 때 쓰는 이름. */
+/** 이름을 안 정했을 때 쓰는 이름. 짧을수록 랭킹에서 읽기 쉽다. */
 export function defaultNickname(randomBytes) {
   const bytes = randomBytes(2)
   const number = ((bytes[0] << 8) | bytes[1]) % 10000
-  return `상어주인${String(number).padStart(4, '0')}`
+  return `상어${String(number).padStart(4, '0')}`
 }
 
 /** 사람이 옮겨 적을 한 줄. **몰래 야구의 코드를 그대로 넣으면 같은 계정이 된다.** */

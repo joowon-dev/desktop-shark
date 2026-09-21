@@ -14,7 +14,7 @@ import {
   defaultNickname, dropBatch, mergeEaten, newSecret, nextBatch,
   parseRecoveryCode, recoveryCode,
 } from '../game/sync.js'
-import { draw, drawSharkBody } from '../render/draw.js'
+import { draw, drawSharkBody, RIM } from '../render/draw.js'
 import {
   feedShark, myShark, randomBytes, registerPlayer, setNickname, sharkRanking, verifyCode,
 } from '../net/ranking.js'
@@ -259,7 +259,7 @@ function refreshDex() {
     c.translate(w / 2, h / 2)
     c.scale(w * 0.82, w * 0.82)
     // **화면의 상어와 같은 함수로 그린다.** 다르면 도감이 아니다.
-    drawSharkBody(c, key, 6, known ? 0.92 : 0.5, 0, 0, w * 0.82)
+    drawSharkBody(c, key, 6, known ? 0.9 : 0.34, 0, 0, w * 0.82, { ink: RIM, rim: false })
     card.appendChild(canvas)
 
     const label = document.createElement('div')
@@ -430,7 +430,7 @@ async function flush() {
 
   const count = nextBatch(engine.pending)
   try {
-    const rows = await feedShark(account.playerId, account.secret, count)
+    const rows = await feedShark(account.playerId, account.secret, count, engine.species)
     engine = { ...engine, pending: dropBatch(engine.pending, count) }
 
     // 서버가 매긴 누적치. 오프라인에서 키운 것을 잃지 않으려고 큰 쪽을 쓴다.
@@ -448,6 +448,55 @@ async function flush() {
 
 setInterval(flush, 3000)
 
+/**
+ * 랭킹 한 줄 — 등수 · 이름 · **그 사람의 상어 · 계급 · 점수**.
+ *
+ * 실루엣은 화면의 상어와 **같은 함수**로 그린다. 종은 서버가 알려 준다.
+ */
+function rankingRow(row) {
+  const li = document.createElement('li')
+  if (row.player_id === account.playerId) li.className = 'me'
+
+  const rank = document.createElement('span')
+  rank.className = 'rank'
+  rank.textContent = row.rank
+  li.appendChild(rank)
+
+  const name = document.createElement('span')
+  name.className = 'name'
+  name.textContent = row.nickname
+  li.appendChild(name)
+
+  const shark = document.createElement('canvas')
+  shark.className = 'mini'
+  const dpr = window.devicePixelRatio || 1
+  const w = 44
+  const h = 18
+  shark.width = Math.round(w * dpr)
+  shark.height = Math.round(h * dpr)
+  const c = shark.getContext('2d')
+  c.setTransform(dpr, 0, 0, dpr, 0, 0)
+  c.translate(w / 2, h / 2)
+  // 계급이 높을수록 이 칸에서도 크게 보인다 — 한 줄만 봐도 누가 큰지 안다.
+  const size = w * (0.40 + 0.085 * (row.stage ?? 1))
+  c.scale(size, size)
+  // 패널은 배경이 늘 어두우니 밝게 채운다.
+  drawSharkBody(c, row.species, row.stage ?? 1, 0.9, 0, 0, size, { ink: RIM, rim: false })
+  li.appendChild(shark)
+
+  const grade = document.createElement('span')
+  grade.className = 'grade'
+  grade.textContent = `${row.stage}단계`
+  li.appendChild(grade)
+
+  const score = document.createElement('span')
+  score.className = 'eaten'
+  score.textContent = `${row.eaten}점`
+  li.appendChild(score)
+
+  return li
+}
+
 async function refreshRanking() {
   const list = document.getElementById('ranking-list')
   const mine = document.getElementById('my-rank')
@@ -459,13 +508,7 @@ async function refreshRanking() {
       list.innerHTML = '<li class="muted">아직 아무도 없습니다. 첫 번째가 되세요.</li>'
     }
     for (const row of rows ?? []) {
-      const li = document.createElement('li')
-      if (row.player_id === account.playerId) li.className = 'me'
-      li.innerHTML = '<span class="rank"></span><span class="name"></span><span class="eaten"></span>'
-      li.querySelector('.rank').textContent = row.rank
-      li.querySelector('.name').textContent = row.nickname
-      li.querySelector('.eaten').textContent = `${row.stage}단계 · ${row.eaten}점`
-      list.appendChild(li)
+      list.appendChild(rankingRow(row))
     }
 
     if (account.playerId) {

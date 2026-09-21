@@ -34,6 +34,25 @@ export const DASH_TURN_RATE = 4.2
 /** 속력이 목표 속력에 붙는 빠르기(1/초). 손맛. */
 export const SPEED_LERP = 3.0
 
+// MARK: 꼬리
+//
+// **위상은 매 스텝 쌓는다. 시간 × 빠르기로 구하지 않는다.**
+//
+// 예전에는 `elapsed * (6 + speed * 30)` 이었다. 그러면 속력이 바뀌는 순간 지나간
+// 시간 전체의 위상이 한꺼번에 다시 계산되어 꼬리가 순간이동한다 — 100 초 지난 뒤
+// 돌진하면 위상이 360 라디안쯤 건너뛴다. 빠르게 헤엄칠 때 꼬리가 부자연스럽던 이유다.
+
+/** 가만히 있어도 꼬리는 이만큼 젓는다 (라디안/초). 손맛. */
+export const TAIL_BASE_RATE = 5.5
+
+/** 속력 1 마다 더해지는 젓는 빠르기 (라디안/초). 손맛. */
+export const TAIL_SPEED_RATE = 26
+
+/** 꼬리가 젓는 폭. 기본 + 속력에 따라 조금 더, 여기까지만. 손맛. */
+export const TAIL_BASE_SWING = 0.030
+export const TAIL_SPEED_SWING = 0.22
+export const TAIL_MAX_SWING = 0.075
+
 // MARK: 밥
 
 /** 화면에 동시에 떠 있는 밥의 최대 개수. 타자로도 떨어지므로 넉넉하다. */

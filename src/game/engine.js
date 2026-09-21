@@ -3,7 +3,10 @@
 // 고정 타임스텝이다. 프레임 시간을 그대로 적분하면 기계마다 상어가 다른 속도로 헤엄친다.
 // 벽시계(`now`)는 밖에서 받는다 — 순수 모듈은 Date.now() 를 부르지 않는다.
 
-import { DT, EAT_REACH, TYPE_FEED_INTERVAL } from './constants.js'
+import {
+  DT, EAT_REACH, TAIL_BASE_RATE, TAIL_BASE_SWING, TAIL_MAX_SWING,
+  TAIL_SPEED_RATE, TAIL_SPEED_SWING, TYPE_FEED_INTERVAL,
+} from './constants.js'
 import { createBrain, intent, stepBrain } from './brain.js'
 import { canEat, dropFood, nearestFood, removeFood, stepFood } from './food.js'
 import { range } from './rng.js'
@@ -46,8 +49,13 @@ export function createEngine(options = {}) {
     justAte: false,
     /** 마지막으로 타자 밥이 떨어진 시각(elapsed 기준). 연타를 막는 데 쓴다. */
     lastTypedAt: -Infinity,
-    /** 누적 시간. 흔들림 위상에 쓴다. */
+    /** 누적 시간. */
     elapsed: 0,
+    /**
+     * 꼬리가 저은 각도. **매 스텝 쌓는다** — 시간 × 빠르기로 구하면 속력이 바뀌는
+     * 순간 지나간 시간 전체가 다시 계산되어 꼬리가 순간이동한다.
+     */
+    tailPhase: 0,
   }
 }
 
@@ -160,6 +168,8 @@ export function step(engine, now, dt = DT) {
   return {
     ...engine,
     collected,
+    // 꼬리는 빠를수록 자주 젓는다. **더한다** — 곱하지 않는다.
+    tailPhase: engine.tailPhase + (TAIL_BASE_RATE + Math.abs(swimmer.speed) * TAIL_SPEED_RATE) * dt,
     food,
     swimmer,
     brain,
@@ -207,6 +217,12 @@ export function snapshot(engine) {
     food: engine.food,
     gameMode: engine.gameMode,
     elapsed: engine.elapsed,
+    tailPhase: engine.tailPhase,
+    /** 꼬리가 젓는 폭. 빠를수록 크게, 여기까지만. */
+    tailSwing: Math.min(
+      TAIL_MAX_SWING,
+      TAIL_BASE_SWING + Math.abs(engine.swimmer.speed) * TAIL_SPEED_SWING,
+    ),
     justAte: engine.justAte,
   }
 }

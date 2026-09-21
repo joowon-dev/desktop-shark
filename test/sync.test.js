@@ -60,8 +60,12 @@ describe('신분', () => {
     expect(secret).not.toMatch(/[lo01]/)
   })
 
-  it('기본 별명은 네 자리 숫자가 붙는다', () => {
-    expect(defaultNickname(counting)).toBe('상어주인0001')
+  it('기본 별명은 「상어」 + 네 자리 숫자다', () => {
+    expect(defaultNickname(counting)).toBe('상어0001')
+  })
+
+  it('짧다 — 랭킹 한 줄에 실루엣·계급·점수가 같이 들어간다', () => {
+    expect(defaultNickname(counting).length).toBeLessThanOrEqual(6)
   })
 
   it('복구 코드는 id 와 비밀을 점으로 잇는다', () => {

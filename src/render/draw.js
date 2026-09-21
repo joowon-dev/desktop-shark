@@ -23,7 +23,7 @@ const INK = '0, 8, 14'
  * 검정이다. 테두리를 두르면 밝은 배경에서는 몸이, 어두운 배경에서는 테두리가 상어를
  * 보여 준다. 두 배경 모두에서 읽히는 유일한 방법이고, 물속에서 빛을 받은 등처럼도 보인다.
  */
-const RIM = '214, 238, 252'
+export const RIM = '214, 238, 252'
 
 /** 테두리의 최소 굵기(px). 아기상어에서도 선이 사라지지 않게. */
 const RIM_MIN_PX = 1.1
@@ -171,13 +171,13 @@ function bend(point, phase, amount) {
 }
 
 function drawShark(ctx, view, snap) {
-  const { swimmer, length, alpha, elapsed } = snap
-  const speed = snap.swimmer.speed
+  const { swimmer, length, alpha } = snap
   const size = length * view.scale
 
-  // 빨리 헤엄칠수록 자주, 크게 흔든다.
-  const phase = elapsed * (6 + speed * 30)
-  const amount = 0.035 + Math.min(0.05, speed * 0.25)
+  // **위상과 폭은 엔진이 쌓아서 준다.** 여기서 시간 × 빠르기로 구하면 속력이 바뀔 때
+  // 꼬리가 순간이동한다(constants.js 의 「꼬리」 참고).
+  const phase = snap.tailPhase
+  const amount = snap.tailSwing
 
   ctx.save()
   ctx.translate(swimmer.x * view.scale, swimmer.y * view.scale)
@@ -192,9 +192,17 @@ function drawShark(ctx, view, snap) {
  *
  * **도감도 이 함수를 쓴다.** 도감의 그림과 화면의 상어가 다르면 도감이 아니다.
  */
-export function drawSharkBody(ctx, speciesKey, stage, alpha, phase = 0, amount = 0, sizePx = 200) {
+export function drawSharkBody(
+  ctx, speciesKey, stage, alpha, phase = 0, amount = 0, sizePx = 200, options = {},
+) {
   const detail = detailOf(stage)
   const species = speciesOf(speciesKey)
+
+  // 바탕화면 위에서는 어두운 몸 + 밝은 테두리다(배경이 밝을 수도 어두울 수도 있으니까).
+  // **패널 안은 배경이 늘 어두우므로 밝게 채운다** — 거기서 테두리만 두르면 속이 빈
+  // 윤곽선으로 보인다. 부르는 쪽이 자기 배경을 안다.
+  const ink = options.ink ?? INK
+  const rimmed = options.rim !== false
 
   // **몸통과 지느러미를 한 path 에 담아 한 번만 칠한다.**
   // 따로 칠하면 겹치는 자리에서 반투명이 두 번 쌓여 지느러미 밑동에 이음매가 비친다.
@@ -215,17 +223,18 @@ export function drawSharkBody(ctx, speciesKey, stage, alpha, phase = 0, amount =
   // 그냥 stroke 하면 지느러미 조각들의 선이 몸 안쪽에도 그려져서 철사 모형이 된다.
   // 두껍게 긋고 → 몸 안쪽을 지우고 → 몸을 칠하면, 안쪽 절반과 내부 선이 함께
   // 사라지고 바깥 절반만 남는다.
-  const rim = Math.max(RIM_MIN_PX / sizePx, 0.010)
-  ctx.lineJoin = 'round'
-  ctx.lineWidth = rim * 2
-  ctx.strokeStyle = `rgba(${RIM}, ${Math.min(1, alpha * 1.6)})`
-  ctx.stroke()
+  if (rimmed) {
+    ctx.lineJoin = 'round'
+    ctx.lineWidth = Math.max(RIM_MIN_PX / sizePx, 0.010) * 2
+    ctx.strokeStyle = `rgba(${RIM}, ${Math.min(1, alpha * 1.6)})`
+    ctx.stroke()
 
-  ctx.globalCompositeOperation = 'destination-out'
-  ctx.fill()
-  ctx.globalCompositeOperation = 'source-over'
+    ctx.globalCompositeOperation = 'destination-out'
+    ctx.fill()
+    ctx.globalCompositeOperation = 'source-over'
+  }
 
-  ctx.fillStyle = `rgba(${INK}, ${alpha})`
+  ctx.fillStyle = `rgba(${ink}, ${alpha})`
   ctx.fill()
 
   // 아래는 전부 실루엣을 **파내는** 것이다. 검은 덩어리에 구멍이 나야 얼굴이 생긴다.

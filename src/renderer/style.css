@@ -315,9 +315,9 @@ summary {
 
 #ranking-list li {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 4px 0;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   font-size: 12px;
 }
@@ -339,7 +339,25 @@ summary {
   white-space: nowrap;
 }
 
+/* 그 사람의 상어. 계급이 높을수록 이 칸에서도 크게 보인다. */
+#ranking-list .mini {
+  flex: none;
+  width: 44px;
+  height: 18px;
+}
+
+#ranking-list .grade {
+  flex: none;
+  width: 34px;
+  text-align: right;
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
+
 #ranking-list .eaten {
-  opacity: 0.6;
+  flex: none;
+  width: 44px;
+  text-align: right;
+  opacity: 0.55;
   font-variant-numeric: tabular-nums;
 }
