@@ -353,11 +353,11 @@ function drawWake(ctx, view, snap, all) {
     // 오래된 쪽이 흐리고 넓다 — 퍼지면서 사라진다.
     const life = 1 - b.age / WAKE_LIFE
     if (life <= 0) continue
-    const spread = (1 - life) * WAKE_SPREAD * view.scale
+    const spread = (1 - life) * WAKE_SPREAD * snap.length * view.scale
 
     // **아주 연하다.** 물자국이 상어보다 눈에 띄면 화면에 흰 줄이 그어진 것으로 보인다.
     ctx.strokeStyle = `rgba(255, 255, 255, ${life * snap.alpha * WAKE_ALPHA})`
-    ctx.lineWidth = Math.max(0.5, life * WAKE_WIDTH * view.scale)
+    ctx.lineWidth = Math.max(0.5, life * WAKE_WIDTH * snap.length * view.scale)
 
     for (const side of [-1, 1]) {
       ctx.beginPath()
@@ -380,7 +380,8 @@ function drawRipples(ctx, view, ripples) {
     ctx.beginPath()
     ctx.arc(r.x * view.scale, r.y * view.scale, radius, 0, Math.PI * 2)
     ctx.strokeStyle = `rgba(255, 255, 255, ${life * RIPPLE_ALPHA})`
-    ctx.lineWidth = Math.max(0.5, life * WAKE_WIDTH * view.scale)
+    // 동심원의 굵기도 그 물결의 크기를 따라간다 — 상어 크기에서 온 값이다.
+    ctx.lineWidth = Math.max(0.5, life * r.maxRadius * 0.06 * view.scale)
     ctx.stroke()
   }
 }

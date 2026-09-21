@@ -43,11 +43,31 @@ describe('크기와 선명도', () => {
     }
   })
 
-  it('상어는 작다 — 다 커도 화면 높이의 1/7 을 안 넘는다', () => {
+  it('상어는 작다 — 다 커도 화면 높이의 1/6 을 안 넘는다', () => {
     // 크면 바탕화면을 가린다. 종 배율이 제일 큰 고래상어까지 세어 본다.
-    expect(lengthOf(6) * 1.45).toBeLessThan(1 / 7)
+    expect(lengthOf(6) * 1.45).toBeLessThan(1 / 6)
     // 그리고 아기상어가 점으로 보이면 안 된다.
-    expect(lengthOf(1)).toBeGreaterThan(0.02)
+    expect(lengthOf(1)).toBeGreaterThan(0.012)
+  })
+
+  it('**한 단계마다 눈에 띄게 커진다**', () => {
+    // 「조금 큰 같은 상어」가 아니라 「다른 상어」로 보여야 키우는 맛이 난다.
+    for (let s = 1; s < 6; s += 1) {
+      const ratio = lengthOf(s + 1) / lengthOf(s)
+      expect(ratio, `${s}단계 → ${s + 1}단계 가 ${ratio.toFixed(2)}배뿐이다`)
+        .toBeGreaterThanOrEqual(1.3)
+    }
+  })
+
+  it('1단계와 6단계가 여섯 배 넘게 차이 난다', () => {
+    expect(lengthOf(6) / lengthOf(1)).toBeGreaterThan(6)
+  })
+
+  it('앞 단계일수록 더 크게 뛴다 — 처음 몇 번이 제일 신난다', () => {
+    const jumps = [1, 2, 3, 4, 5].map((s) => lengthOf(s + 1) / lengthOf(s))
+    for (let i = 1; i < jumps.length; i += 1) {
+      expect(jumps[i], `${i + 1}번째 도약`).toBeLessThanOrEqual(jumps[i - 1])
+    }
   })
 
   it('1단계는 흐릿하고 6단계도 바탕화면을 가리지 않는다', () => {
@@ -148,17 +168,19 @@ describe('물자국', () => {
   it('값을 못 박는다', () => {
     expect(WAKE_ALPHA).toBe(0.05)
     expect(WAKE_LIFE).toBe(0.85)
-    expect(WAKE_WIDTH).toBe(0.0022)
-    expect(WAKE_SPREAD).toBe(0.012)
+    expect(WAKE_WIDTH).toBe(0.06)
+    expect(WAKE_SPREAD).toBe(0.24)
   })
 
   it('짧게 남는다 — 길게 끌면 화면에 선이 쌓인다', () => {
     expect(WAKE_LIFE).toBeLessThan(1)
   })
 
-  it('선이 몸보다 훨씬 가늘다', () => {
-    // 1단계 상어 길이의 1/8 보다 가늘어야 선으로 보이지 덩어리로 안 보인다.
-    expect(WAKE_WIDTH).toBeLessThan(lengthOf(1) / 8)
+  it('선이 몸보다 훨씬 가늘다 — 어느 단계에서나', () => {
+    // 몸 길이 대비 값이라 단계와 상관없이 같은 비율로 가늘다. 화면 대비로 뒀을 때는
+    // 아기상어가 제 몸보다 굵은 자국을 남겼다.
+    expect(WAKE_WIDTH).toBeLessThan(1 / 8)
+    expect(WAKE_SPREAD).toBeLessThan(1)
   })
 
   it('먹은 자리의 동심원도 자국만큼 흐리다', () => {
