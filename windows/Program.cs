@@ -480,7 +480,8 @@ sealed class Overlay : Form
     // 흐리게 하지 않으면서** 그 창을 픽셀 단위 알파로 합성하게 만든다. WebView2 의
     // DefaultBackgroundColor = Transparent 와 함께 쓰면 반투명이 그대로 산다.
     //
-    // **이 경로는 실제 윈도우에서 아직 확인되지 않았다** — 이 맥에 dotnet 이 없다.
+    // **이 경로는 실제 윈도우에서 아직 확인되지 않았다.** 컴파일은 이 맥에서도 된다
+    // (windows/build.sh) — 컴파일이 되는 것과 DWM 이 실제로 합성해 주는 것은 다른 일이다.
 
     protected override CreateParams CreateParams
     {
