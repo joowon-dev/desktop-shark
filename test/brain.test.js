@@ -128,6 +128,27 @@ describe('intent', () => {
     expect(want.target).toEqual({ x: 0.85, y: 0.52 })
   })
 
+  it('**쫓기로 한 밥만 본다** — 더 나은 밥이 나타나도 안 갈아탄다', () => {
+    // 매 프레임 「제일 나은 밥」을 다시 고르면, 타자로 밥이 흩뿌려질 때 목표가
+    // 수백 번 뒤바뀌어 상어가 그 사이를 맴돌기만 하고 아무것도 못 먹는다.
+    const swimmer = { x: 0.8, y: 0.5, heading: 0, speed: 0.22 }
+    const chasing = createFood(1, 1.4, 0.5, 'small')      // 멀고 작은, 쫓던 밥
+    const tempting = createFood(2, 0.84, 0.5, 'big')      // 코앞의 큰 밥
+    const brain = { ...createBrain(rng()), state: 'dash', targetId: 1 }
+
+    const { target } = intent(brain, { swimmer, food: [chasing, tempting], bounds })
+    expect(target.x).toBeCloseTo(chasing.x, 6)
+    expect(target.y).toBeCloseTo(chasing.y, 6)
+  })
+
+  it('쫓던 밥이 사라지면 그때는 새로 고른다', () => {
+    const swimmer = { x: 0.8, y: 0.5, heading: 0, speed: 0.22 }
+    const other = createFood(2, 0.84, 0.5, 'big')
+    const brain = { ...createBrain(rng()), state: 'dash', targetId: 99 } // 없는 id
+    const { target } = intent(brain, { swimmer, food: [other], bounds })
+    expect(target.x).toBeCloseTo(other.x, 6)
+  })
+
   it('돌진이 순찰보다 빠르다', () => {
     const swimmer = { x: 0.8, y: 0.5, heading: 0, speed: 0.1 }
     const food = [createFood(1, 0.5, 0.5)]

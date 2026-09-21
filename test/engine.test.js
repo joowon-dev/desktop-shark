@@ -403,3 +403,96 @@ describe('꼬리', () => {
     expect(snapshot(crazy).tailSwing).toBe(TAIL_MAX_SWING)
   })
 })
+
+describe('밥을 빙글빙글 돌기만 하지 않는다', () => {
+  // **실제로 겪은 증상이다.** 돌진 속력을 선회 속도로 나눈 것이 최소 선회 반경인데,
+  // 그게 먹힘 반경보다 크면 상어는 제 선회 원 안쪽의 밥에 영원히 못 닿는다.
+  // 밥 둘레를 돌다가 수명이 다해 사라질 때까지 못 먹는다.
+  it.each([1, 3, 6])('%i단계 — 어느 방향에서 시작해도 먹는다', (stage) => {
+    const eaten = [0, 30, 100, 250, 550, 1000][stage - 1]
+    const failures = []
+
+    for (let angle = 0; angle < 12; angle += 1) {
+      for (const distance of [0.05, 0.12, 0.3]) {
+        const heading = (angle / 12) * Math.PI * 2
+        let e = createEngine({ eaten, lastFedAt: 0, seed: 4, bounds, now: 0 })
+        // 밥을 코앞 옆쪽에 두고 전속력으로 지나가게 만든다 — 제일 어려운 경우다.
+        e = {
+          ...e,
+          swimmer: { x: bounds.w / 2, y: 0.5, heading: 0, speed: 0.22 },
+        }
+        e = feedAt(e,
+          bounds.w / 2 + Math.cos(heading) * distance,
+          0.5 + Math.sin(heading) * distance)
+
+        let now = 0
+        let ate = false
+        // 밥 수명(20초) 안에 먹어야 한다.
+        for (let i = 0; i < 60 * 19 && !ate; i += 1) {
+          now += DT * 1000
+          e = step(e, now, DT)
+          if (e.justAte) ate = true
+        }
+        if (!ate) failures.push(`${(heading * 180 / Math.PI).toFixed(0)}° / ${distance}`)
+      }
+    }
+
+    expect(failures, `못 먹은 경우: ${failures.join(', ')}`).toEqual([])
+  })
+})
+
+describe('밥 곁에서 맴돌기만 하지 않는다', () => {
+  /**
+   * **실제로 겪은 증상이다** — 상어가 밥 둘레를 빙글빙글 돌다가 밥이 수명을 다해
+   * 사라질 때까지 못 먹었다.
+   *
+   * 원인이 셋이었다.
+   *  1. 먹는 것은 **입**으로 재는데 헤엄치는 것은 **몸 중심**이라, 중심을 밥에 맞추면
+   *     입은 몸 절반만큼 지나쳐 있다. 3 단계부터는 몸 절반이 먹힘 반경보다 커서
+   *     중심을 정확히 맞춰도 입이 안 닿는다.
+   *  2. 전속력의 선회 반경이 먹힘 반경보다 커서 제 선회 원 안쪽에 못 닿는다.
+   *  3. 밥이 여럿이면 매 프레임 목표가 뒤바뀌어 그 사이를 맴돈다.
+   *
+   * 한 개만 놓고 보면 어느 경우든 결국 먹어서 안 드러난다. **곁에 오래 있었는데도
+   * 못 먹었는가**로 봐야 잡힌다.
+   */
+  it('상어가 곁에 오래 있었으면 반드시 먹는다', () => {
+    const screen = { w: 16 / 9, h: 1 }
+    let orbited = 0
+
+    for (const stage of [1, 3, 6]) {
+      for (const seed of [3, 11, 29]) {
+        let e = createEngine({
+          eaten: [0, 30, 100, 250, 550, 1000][stage - 1],
+          lastFedAt: 0, seed, bounds: screen, now: 0,
+        })
+        let now = 0
+        const near = new Map()
+
+        for (let i = 0; i < 60 * 240; i += 1) {
+          now += DT * 1000
+          if (i % 36 === 0) e = feedTyped(e)
+          if (i % 600 === 0) e = feedAt(e, 0.3 + (i % 5) * 0.25, 0.3 + (i % 3) * 0.2)
+
+          const before = e.food.map((f) => f.id)
+          e = step(e, now, DT)
+
+          for (const f of e.food) {
+            if (Math.hypot(f.x - e.swimmer.x, f.y - e.swimmer.y) < 0.12) {
+              near.set(f.id, (near.get(f.id) ?? 0) + 1)
+            }
+          }
+          for (const id of before) {
+            if (e.food.some((g) => g.id === id) || e.justAte) continue
+            // 수명이 다해 사라졌다. 상어가 6초 넘게 곁에 있었다면 맴돌기만 한 것이다.
+            if ((near.get(id) ?? 0) / 60 > 6) orbited += 1
+          }
+        }
+      }
+    }
+
+    expect(orbited, `${orbited} 개를 곁에 두고도 못 먹었다`).toBe(0)
+  })
+
+
+})

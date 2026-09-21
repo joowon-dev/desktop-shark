@@ -4,7 +4,7 @@
 // 벽시계(`now`)는 밖에서 받는다 — 순수 모듈은 Date.now() 를 부르지 않는다.
 
 import {
-  DT, EAT_REACH, TAIL_BASE_RATE, TAIL_BASE_SWING, TAIL_MAX_SWING,
+  DT, EAT_RADIUS, EAT_REACH, TAIL_BASE_RATE, TAIL_BASE_SWING, TAIL_MAX_SWING,
   TAIL_SPEED_RATE, TAIL_SPEED_SWING, TYPE_FEED_INTERVAL,
 } from './constants.js'
 import { createBrain, intent, stepBrain } from './brain.js'
@@ -132,8 +132,8 @@ export function step(engine, now, dt = DT) {
   // 2. 입이 닿았는가. 먹는 중일 때는 다시 물지 않는다.
   const mouth = mouthOf(engine)
   const prey = nearestFood(food, mouth)
-  const ateThisStep = engine.brain.state !== 'eat'
-    && canEat(prey, mouth, lengthNow(engine) * EAT_REACH)
+  const reach = Math.max(EAT_RADIUS, lengthNow(engine) * EAT_REACH)
+  const ateThisStep = engine.brain.state !== 'eat' && canEat(prey, mouth, reach)
 
   let { eaten, lastFedAt, pending } = engine
   if (ateThisStep) {
@@ -158,7 +158,9 @@ export function step(engine, now, dt = DT) {
   }, dt)
 
   // 4. 몸이 그쪽으로 헤엄친다. 종마다 속력이 다르다.
-  const want = intent(brain, { swimmer: engine.swimmer, food, bounds: engine.bounds })
+  const want = intent(brain, {
+    swimmer: engine.swimmer, food, bounds: engine.bounds, reach,
+  })
   const pace = speciesOf(engine.species).speed
   const swimmer = swimStep(engine.swimmer, want.target, want.speed * pace, dt, want.turnRate)
 
