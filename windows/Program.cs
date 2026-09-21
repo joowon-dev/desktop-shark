@@ -248,6 +248,15 @@ sealed class Overlay : Form
     /// </summary>
     public bool RankingOn { get; private set; } = true;
 
+    /// <summary>지금 키우는 상어의 종.</summary>
+    public string SpeciesKey { get; private set; } = "white";
+
+    /// <summary>도감 — 6단계까지 키워 본 종들.</summary>
+    public List<string> Collected { get; private set; } = new();
+
+    /// <summary>별명을 치는 중인가. <b>이때만</b> 키보드를 가져온다.</summary>
+    private bool holdingKeyboard;
+
     /// <summary>얹을 모니터의 장치 이름. 없거나 사라졌으면 주 화면.</summary>
     public string? ScreenName { get; private set; }
 
@@ -473,6 +482,8 @@ sealed class Overlay : Form
         secret = Secret,
         nickname = Nickname,
         ranking = RankingOn,
+        species = SpeciesKey,
+        collected = Collected,
     });
 
     /// <summary>맥 셸과 <b>같은 모양</b>의 다리. 한쪽만 고치면 두 플랫폼이 다른 게임이 된다.</summary>
@@ -495,6 +506,11 @@ sealed class Overlay : Form
           onRanking: (handler) => { window.__sharkRanking = handler },
           saveRanking: (on) => window.chrome.webview.postMessage({ type: 'ranking', on: !!on }),
           closePanel: () => window.chrome.webview.postMessage({ type: 'closePanel' }),
+          grabKeyboard: () => window.chrome.webview.postMessage({ type: 'grabKeyboard' }),
+          releaseKeyboard: () => window.chrome.webview.postMessage({ type: 'releaseKeyboard' }),
+          saveDex: (d) => window.chrome.webview.postMessage({
+            type: 'dex', species: d && d.species, collected: d && d.collected,
+          }),
         }
         window.addEventListener('error', (e) => window.chrome.webview.postMessage({
           type: 'log', text: `${e.message} (${e.filename}:${e.lineno})`,
@@ -565,12 +581,31 @@ sealed class Overlay : Form
         Send($"window.__sharkPanel && window.__sharkPanel({(open ? "true" : "false")})");
         UpdateMousePass();
 
-        // 별명을 타이핑하려면 창이 키보드를 받아야 한다. WS_EX_NOACTIVATE 가 붙어 있는
-        // 동안은 한 글자도 못 친다. <b>패널을 열 때만</b> 떼고, 닫으면 곧장 도로 붙인다.
+        // **패널을 열어도 키보드는 안 가져간다.** 가져가면 랭킹을 띄워 둔 채로 다른
+        // 창에 한 글자도 못 친다. 마우스만 받고(버튼을 눌러야 하니까), 키보드는
+        // 별명 칸을 실제로 눌렀을 때만 가져온다.
+        if (!open) ReleaseKeyboard();
+    }
+
+    /// <summary>별명 칸을 눌렀다. 이제서야 키보드를 가져온다.</summary>
+    private void GrabKeyboard()
+    {
+        if (holdingKeyboard) return;
+        holdingKeyboard = true;
         var style = GetWindowLong(Handle, GWL_EXSTYLE);
-        SetWindowLong(Handle, GWL_EXSTYLE,
-            open ? style & ~WS_EX_NOACTIVATE : style | WS_EX_NOACTIVATE);
-        if (open) SetForegroundWindow(Handle);
+        SetWindowLong(Handle, GWL_EXSTYLE, style & ~WS_EX_NOACTIVATE);
+        SetForegroundWindow(Handle);
+        DebugLog("키보드 가져옴");
+    }
+
+    /// <summary>별명 칸에서 손을 뗐거나 패널을 닫았다. 쓰던 앱으로 돌려준다.</summary>
+    private void ReleaseKeyboard()
+    {
+        if (!holdingKeyboard) return;
+        holdingKeyboard = false;
+        var style = GetWindowLong(Handle, GWL_EXSTYLE);
+        SetWindowLong(Handle, GWL_EXSTYLE, style | WS_EX_NOACTIVATE);
+        DebugLog("키보드 돌려줌");
     }
 
     public void ToggleVisible()
@@ -589,13 +624,15 @@ sealed class Overlay : Form
     public void ResetShark()
     {
         var answer = MessageBox.Show(
-            "이 기기에서 키운 기록이 사라지고 아기상어부터 다시 시작합니다.\n"
+            "이 기기에서 키운 기록과 도감이 사라지고 아기 백상아리부터 다시 시작합니다.\n"
             + "랭킹 기록은 서버에 남고, 복구 코드를 다시 넣으면 돌아옵니다.",
             "상어를 놓아줄까요?", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning);
         if (answer != DialogResult.OK) return;
 
         Eaten = 0;
         LastFedAt = 0;
+        SpeciesKey = "white";
+        Collected = new List<string>();
         WriteState();
         if (ready) web.CoreWebView2.Reload();
         SettingsChanged?.Invoke();
@@ -651,6 +688,26 @@ sealed class Overlay : Form
                     SetPanel(false);
                     return;
 
+                case "grabKeyboard":
+                    GrabKeyboard();
+                    return;
+
+                case "releaseKeyboard":
+                    ReleaseKeyboard();
+                    return;
+
+                case "dex":
+                    SpeciesKey = Str(body, "species") ?? SpeciesKey;
+                    if (body.TryGetProperty("collected", out var dex) && dex.ValueKind == JsonValueKind.Array)
+                    {
+                        Collected = dex.EnumerateArray()
+                            .Where(v => v.ValueKind == JsonValueKind.String)
+                            .Select(v => v.GetString()!)
+                            .ToList();
+                    }
+                    WriteState();
+                    return;
+
                 case "status":
                     var stage = body.TryGetProperty("stage", out var s) ? s.GetInt32() : 1;
                     var hunger = Str(body, "hunger") ?? "";
@@ -681,6 +738,11 @@ sealed class Overlay : Form
             Secret = Str(json, "secret");
             Nickname = Str(json, "nickname");
             ScreenName = Str(json, "screen");
+            SpeciesKey = Str(json, "species") ?? "white";
+            Collected = json.TryGetProperty("collected", out var dex) && dex.ValueKind == JsonValueKind.Array
+                ? dex.EnumerateArray().Where(v => v.ValueKind == JsonValueKind.String)
+                     .Select(v => v.GetString()!).ToList()
+                : new List<string>();
             RankingOn = !json.TryGetProperty("ranking", out var rank) || rank.ValueKind != JsonValueKind.False;
         }
         catch
@@ -703,6 +765,8 @@ sealed class Overlay : Form
                 secret = Secret,
                 nickname = Nickname,
                 ranking = RankingOn,
+                species = SpeciesKey,
+                collected = Collected,
                 screen = ScreenName,
             }));
         }

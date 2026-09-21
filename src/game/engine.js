@@ -3,12 +3,13 @@
 // 고정 타임스텝이다. 프레임 시간을 그대로 적분하면 기계마다 상어가 다른 속도로 헤엄친다.
 // 벽시계(`now`)는 밖에서 받는다 — 순수 모듈은 Date.now() 를 부르지 않는다.
 
-import { DT, TYPE_FEED_INTERVAL } from './constants.js'
+import { DT, EAT_REACH, TYPE_FEED_INTERVAL } from './constants.js'
 import { createBrain, intent, stepBrain } from './brain.js'
 import { canEat, dropFood, nearestFood, removeFood, stepFood } from './food.js'
 import { range } from './rng.js'
 import { hungerAt } from './hunger.js'
 import { lengthOf, stageOf, visibility } from './growth.js'
+import { FIRST_SPECIES, collect, pickSpecies, speciesOf } from './species.js'
 import { makeRng } from './rng.js'
 import { createSwimmer, step as swimStep } from './swim.js'
 import { enqueueFeed } from './sync.js'
@@ -29,6 +30,10 @@ export function createEngine(options = {}) {
     nextFoodId: 1,
     eaten: options.eaten ?? 0,
     lastFedAt: options.lastFedAt ?? null,
+    /** 지금 키우는 상어의 종. 한 마리가 사는 동안 안 바뀐다. */
+    species: options.species ?? FIRST_SPECIES,
+    /** 6단계까지 키워 본 종들. 도감이다. */
+    collected: options.collected ?? [],
     now: options.now ?? 0,
     /**
      * 밥 주기. **기본이 켜짐이다** — 앱을 띄우면 늘 상어가 먹고 있고,
@@ -89,9 +94,14 @@ export function feedTyped(engine) {
   return { ...engine, food, nextFoodId: engine.nextFoodId + 1, lastTypedAt: engine.elapsed }
 }
 
+/** 이 상어의 몸 길이. 종마다 배율이 다르다. */
+export function lengthNow(engine) {
+  return lengthOf(stageOf(engine.eaten)) * speciesOf(engine.species).size
+}
+
 /** 상어의 입 — 코끝. 밥을 먹었는지는 몸통이 아니라 여기로 잰다. */
 export function mouthOf(engine) {
-  const half = lengthOf(stageOf(engine.eaten)) / 2
+  const half = lengthNow(engine) / 2
   return {
     x: engine.swimmer.x + Math.cos(engine.swimmer.heading) * half,
     y: engine.swimmer.y + Math.sin(engine.swimmer.heading) * half,
@@ -114,7 +124,8 @@ export function step(engine, now, dt = DT) {
   // 2. 입이 닿았는가. 먹는 중일 때는 다시 물지 않는다.
   const mouth = mouthOf(engine)
   const prey = nearestFood(food, mouth)
-  const ateThisStep = engine.brain.state !== 'eat' && canEat(prey, mouth)
+  const ateThisStep = engine.brain.state !== 'eat'
+    && canEat(prey, mouth, lengthNow(engine) * EAT_REACH)
 
   let { eaten, lastFedAt, pending } = engine
   if (ateThisStep) {
@@ -138,12 +149,17 @@ export function step(engine, now, dt = DT) {
     rng: engine.rng,
   }, dt)
 
-  // 4. 몸이 그쪽으로 헤엄친다.
+  // 4. 몸이 그쪽으로 헤엄친다. 종마다 속력이 다르다.
   const want = intent(brain, { swimmer: engine.swimmer, food, bounds: engine.bounds })
-  const swimmer = swimStep(engine.swimmer, want.target, want.speed, dt, want.turnRate)
+  const pace = speciesOf(engine.species).speed
+  const swimmer = swimStep(engine.swimmer, want.target, want.speed * pace, dt, want.turnRate)
+
+  // 5. 다 크면 도감에 오른다. **키우는 동안 저절로 오른다** — 따로 누를 것이 없다.
+  const collected = stageOf(eaten) >= 6 ? collect(engine.collected, engine.species) : engine.collected
 
   return {
     ...engine,
+    collected,
     food,
     swimmer,
     brain,
@@ -156,6 +172,25 @@ export function step(engine, now, dt = DT) {
   }
 }
 
+/**
+ * 다 큰 상어를 놓아주고 **새 종의 아기상어**를 맞이한다.
+ *
+ * 도감은 그대로 두고 누적만 0 으로 돌린다. 이미 도감에 있는 종은 피해서 고른다 —
+ * 다 모으기 전에 같은 종이 또 오면 모으는 일이 운에 맡겨진다.
+ */
+export function releaseAndNext(engine, now) {
+  const collected = collect(engine.collected, engine.species)
+  return {
+    ...engine,
+    collected,
+    species: pickSpecies(engine.rng, collected),
+    eaten: 0,
+    lastFedAt: now,
+    pending: 0,
+    food: [],
+  }
+}
+
 /** 그리는 쪽이 알고 싶어 하는 것만 모아 준다. */
 export function snapshot(engine) {
   const stage = stageOf(engine.eaten)
@@ -165,7 +200,9 @@ export function snapshot(engine) {
     hunger: hungerAt(engine.lastFedAt, engine.now),
     state: engine.brain.state,
     alpha: visibility(stage, engine.brain.state, engine.gameMode),
-    length: lengthOf(stage),
+    length: lengthNow(engine),
+    species: engine.species,
+    collected: engine.collected,
     swimmer: engine.swimmer,
     food: engine.food,
     gameMode: engine.gameMode,

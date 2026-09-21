@@ -24,8 +24,24 @@
 
     <!-- ⌥⇧R 로 여는 패널. 여기만 클릭·타이핑을 받는다. -->
     <div id="panel" hidden>
-      <button id="close-panel" title="닫기 (⌥⇧R)" aria-label="닫기">×</button>
-      <h1>바탕화면 상어</h1>
+      <!-- 여기를 잡고 끈다. 창틀이 없으니 손잡이를 따로 만들어 준다. -->
+      <div id="grip">
+        <h1>바탕화면 상어</h1>
+        <button id="close-panel" title="닫기 (⌥⇧R)" aria-label="닫기">×</button>
+      </div>
+
+      <div id="tabs">
+        <button class="tab on" data-tab="dex">도감</button>
+        <button class="tab" data-tab="rank">랭킹</button>
+      </div>
+
+      <section id="tab-dex">
+        <p class="muted" id="dex-now"></p>
+        <div id="dex-list"></div>
+        <button id="release" hidden>다 컸다 — 놓아주고 새 상어 맞이하기</button>
+      </section>
+
+      <section id="tab-rank" hidden>
 
       <label id="ranking-switch">
         <input id="ranking-on" type="checkbox" checked />
@@ -35,7 +51,7 @@
         끄면 아무것도 서버로 안 보냅니다. 상어는 그대로 자랍니다.
       </p>
 
-      <section id="account">
+      <div id="account">
         <p class="muted" id="account-state">계정이 없습니다.</p>
         <div class="row">
           <input id="nickname" type="text" maxlength="12" placeholder="별명 (최대 12자)" />
@@ -52,11 +68,12 @@
           </div>
           <p class="code" id="my-code"></p>
         </details>
-      </section>
+      </div>
 
-      <section id="ranking">
-        <h2>랭킹 <span class="muted" id="my-rank"></span></h2>
+      <div id="ranking">
+        <h2>순위 <span class="muted" id="my-rank"></span></h2>
         <ol id="ranking-list"><li class="muted">불러오는 중…</li></ol>
+      </div>
       </section>
 
       <p class="muted hint">⌥⇧S 밥 주기 멈추기 · ⌥⇧R 이 패널 · ⌥⇧H 숨기기</p>

@@ -61,10 +61,13 @@ export function nearestFood(list, point) {
   return best
 }
 
-/** 입이 닿았는가. */
-export function canEat(food, mouth) {
+/**
+ * 입이 닿았는가. 반경은 상어마다 다르다 — 큰 상어는 입도 크다.
+ * 안 주면 최소 반경을 쓴다.
+ */
+export function canEat(food, mouth, radius = EAT_RADIUS) {
   if (!food) return false
-  return Math.hypot(food.x - mouth.x, food.y - mouth.y) <= EAT_RADIUS
+  return Math.hypot(food.x - mouth.x, food.y - mouth.y) <= Math.max(EAT_RADIUS, radius)
 }
 
 /** 먹었다. 그 하나만 뺀다. */

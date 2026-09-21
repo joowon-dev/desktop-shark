@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   createEngine, feedAt, feedTyped, mouthOf, setGameMode, snapshot, step,
 } from '../src/game/engine.js'
-import { DT, FOOD_KINDS, MAX_FOOD, TYPE_FEED_INTERVAL } from '../src/game/constants.js'
+import {
+  DT, EAT_RADIUS, EAT_REACH, FOOD_KINDS, MAX_FOOD, TYPE_FEED_INTERVAL,
+} from '../src/game/constants.js'
 
 const bounds = { w: 16 / 9, h: 1 }
 
@@ -68,8 +70,8 @@ describe('밥 두 종류', () => {
   })
 
   it('밥은 작다 — 바탕화면 위에 늘 떠 있어서 눈에 띄면 거슬린다', () => {
-    expect(FOOD_KINDS.big.radius).toBeLessThanOrEqual(0.008)
-    expect(FOOD_KINDS.small.radius).toBeLessThanOrEqual(0.004)
+    expect(FOOD_KINDS.big.radius).toBeLessThanOrEqual(0.006)
+    expect(FOOD_KINDS.small.radius).toBeLessThanOrEqual(0.003)
     expect(FOOD_KINDS.big.radius).toBeGreaterThan(FOOD_KINDS.small.radius)
   })
 
@@ -159,6 +161,14 @@ describe('mouthOf', () => {
     const half = snapshot(e).length / 2
     const mouth = mouthOf(e)
     expect(Math.hypot(mouth.x - e.swimmer.x, mouth.y - e.swimmer.y)).toBeCloseTo(half, 9)
+  })
+
+  it('입 크기는 몸 길이를 안 넘는다 — 제 몸보다 먼 밥을 삼키면 안 된다', () => {
+    for (const eaten of [0, 30, 100, 250, 550, 1000]) {
+      const e = createEngine({ eaten, bounds, now: 0 })
+      const reach = Math.max(EAT_RADIUS, snapshot(e).length * EAT_REACH)
+      expect(reach, `${eaten}점`).toBeLessThanOrEqual(snapshot(e).length)
+    }
   })
 
   it('상어가 크면 입이 몸통에서 더 멀다', () => {

@@ -9,12 +9,14 @@
 // **엿듣기만** 해서 밥을 떨어뜨린다. 누르던 버튼은 그대로 눌리고 치던 글자는 그대로
 // 찍힌다. 패널을 열 때만 잠깐 마우스와 키보드를 받는다.
 //
-// 전역 모니터는 키를 **삼키지 않는다** — 삼켜야 하는 것(핫키)과 삼키면 안 되는 것
-// (엿듣기)은 애초에 다른 API 다. 다만 손쉬운 사용 권한이 필요하다.
+// **그리고 권한이 필요 없다.** 키를 읽는 것이 아니라 세기만 하기 때문이다 —
+// CGEventSource 의 통계 카운터는 「keyDown 이 지금까지 몇 번 있었나」만 알려 주고
+// 어떤 키였는지는 알려 주지 않는다. 손쉬운 사용 권한 없이도 읽힌다(확인함).
+// 애초에 알 수가 없으므로, 「몇 번 쳤는지만 센다」는 말이 설명이 아니라 사실이다.
 
 import AppKit
-import ApplicationServices
 import Carbon.HIToolbox
+import CoreGraphics
 import WebKit
 
 // MARK: - 상수
@@ -35,6 +37,8 @@ private let playerIdKey = "playerId"
 private let secretKey = "playerSecret"
 private let nicknameKey = "nickname"
 private let rankingKey = "rankingOn"
+private let speciesKey = "species"
+private let collectedKey = "collected"
 private let screenKey = "screenNumber"
 private let webScheme = "shark"
 
@@ -112,11 +116,14 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
     /// 앱을 띄우면 늘 켜진 채로 시작한다.
     private var gameMode = true
 
-    /// 전역으로 클릭·타자를 엿듣는 모니터. 권한이 없으면 nil 인 채로 남는다.
-    private var clickMonitor: Any?
-    private var keyMonitor: Any?
-    /// 랭킹 패널이 열려 있는가. 열려 있는 동안만 창이 키보드를 받는다.
+    /// 입력 수를 들여다보는 타이머. 상태를 「물어보는」 것이라 권한이 필요 없다.
+    private var inputTimer: Timer?
+    private var lastKeys: UInt32 = 0
+    private var lastClicks: UInt32 = 0
+    /// 랭킹 패널이 열려 있는가. 열려 있는 동안만 창이 마우스를 받는다.
     private var panelOpen = false
+    /// 별명을 치는 중인가. **이때만** 키보드를 가져온다 — 그 밖에는 다른 창에 그대로 쳐진다.
+    private var holdingKeyboard = false
     /// 지금 클릭이 창을 통과하고 있는가. 매 프레임 창을 건드리지 않으려고 들고 있는다.
     private var passingThrough = true
 
@@ -144,6 +151,17 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
         get { UserDefaults.standard.string(forKey: nicknameKey) }
         set { UserDefaults.standard.set(newValue, forKey: nicknameKey) }
     }
+    /// 지금 키우는 상어의 종.
+    private var species: String {
+        get { UserDefaults.standard.string(forKey: speciesKey) ?? "white" }
+        set { UserDefaults.standard.set(newValue, forKey: speciesKey) }
+    }
+    /// 도감 — 6단계까지 키워 본 종들.
+    private var collected: [String] {
+        get { UserDefaults.standard.stringArray(forKey: collectedKey) ?? [] }
+        set { UserDefaults.standard.set(newValue, forKey: collectedKey) }
+    }
+
     /// 랭킹에 올릴 것인가. **밥 주기와 달리 이건 저장한다** — 「안 올린다」는 설정이다.
     /// 등록된 적이 없으면 기본은 켜짐.
     private var rankingOn: Bool {
@@ -209,6 +227,8 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
         payload["secret"] = secret ?? NSNull()
         payload["nickname"] = nickname ?? NSNull()
         payload["ranking"] = rankingOn
+        payload["species"] = species
+        payload["collected"] = collected
 
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
               let json = String(data: data, encoding: .utf8) else {
@@ -239,6 +259,11 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
             type: 'ranking', on: !!on,
           }),
           closePanel: () => window.webkit.messageHandlers.shark.postMessage({ type: 'closePanel' }),
+          grabKeyboard: () => window.webkit.messageHandlers.shark.postMessage({ type: 'grabKeyboard' }),
+          releaseKeyboard: () => window.webkit.messageHandlers.shark.postMessage({ type: 'releaseKeyboard' }),
+          saveDex: (d) => window.webkit.messageHandlers.shark.postMessage({
+            type: 'dex', species: d && d.species, collected: d && d.collected,
+          }),
         }
         // 웹뷰는 콘솔이 안 보인다. 오류만이라도 셸의 stderr 로 흘려보낸다.
         window.addEventListener('error', (e) => window.webkit.messageHandlers.shark.postMessage({
@@ -287,14 +312,6 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
         mode.state = gameMode ? .on : .off
         menu.addItem(mode)
 
-        // 권한이 없으면 클릭은 밥이 되는데 타자만 조용히 안 된다. 그 조용함을 여기서 깬다.
-        if !trusted {
-            let permission = NSMenuItem(title: "⚠︎ 타자가 밥이 되려면 권한이 필요합니다…",
-                                        action: #selector(askForAccessibility), keyEquivalent: "")
-            permission.target = self
-            menu.addItem(permission)
-        }
-
         let panel = NSMenuItem(title: "랭킹 · 계정  ⌥⇧R", action: #selector(togglePanel), keyEquivalent: "")
         panel.target = self
         menu.addItem(panel)
@@ -326,7 +343,7 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
         let alert = NSAlert()
         alert.messageText = "상어를 놓아줄까요?"
         alert.informativeText = """
-        이 기기에서 키운 기록이 사라지고 아기상어부터 다시 시작합니다.
+        이 기기에서 키운 기록과 **도감**이 사라지고 아기 백상아리부터 다시 시작합니다.
         랭킹 기록은 서버에 남고, 복구 코드를 다시 넣으면 돌아옵니다.
         """
         alert.addButton(withTitle: "놓아주기")
@@ -338,6 +355,8 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
 
         eaten = 0
         lastFedAt = 0
+        species = "white"
+        collected = []
         webView.reload()
         refreshMenu()
     }
@@ -379,48 +398,63 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
 
     // MARK: 엿듣기 — 클릭과 타자를 밥으로
 
-    /// 손쉬운 사용 권한이 있는가. 전역 키 모니터는 이것 없이는 **조용히 아무것도 안 준다** —
-    /// 에러도 안 나고 콜백만 영영 안 불린다. 그래서 물어보고 상태를 들고 있는다.
-    private var trusted: Bool { AXIsProcessTrusted() }
-
-    /// 권한을 물어본 적이 있는가. 띄울 때마다 창을 띄우면 성가시다.
-    private let askedKey = "askedForAccessibility"
-
     /**
-     클릭과 타자를 전역으로 엿듣는다.
+     지금까지 키를 몇 번 눌렀나. **어떤 키였는지는 안 준다 — 알 수가 없다.**
 
-     **삼키지 않는다.** `addGlobalMonitorForEvents` 는 남의 앱으로 가는 이벤트를
-     구경만 시켜 준다 — 누르던 버튼은 그대로 눌리고 치던 글자는 그대로 찍힌다.
-     키를 삼키는 것(전역 핫키)과는 아예 다른 API 다.
-
-     마우스는 권한 없이도 오는 경우가 있지만 키는 반드시 손쉬운 사용 권한이 있어야 한다.
+     `CGEventSource` 의 통계 카운터다. 이벤트를 받아 보는 것이 아니라 「몇 번 있었나」를
+     물어보는 것이라 **손쉬운 사용 권한이 필요 없다**(권한 없는 번들로 확인했다).
+     예전에는 `addGlobalMonitorForEvents` 로 keyDown 을 받아 봤는데, 그건 키를 삼키지는
+     않아도 **읽을 수는 있어서** 권한을 받아야 했다. 셀 수만 있으면 되는 일에 읽을 수
+     있는 길을 여는 것은 과했다.
      */
-    private func startEavesdropping() {
-        clickMonitor = NSEvent.addGlobalMonitorForEvents(
-            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
-        ) { [weak self] event in
-            self?.heardClick(at: event.locationInWindow)
-        }
-
-        keyMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { [weak self] _ in
-            self?.heardTyping()
-        }
-
-        debugLog("엿듣기 시작 trusted=\(trusted)")
-        if !trusted && !UserDefaults.standard.bool(forKey: askedKey) {
-            UserDefaults.standard.set(true, forKey: askedKey)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                self?.askForAccessibility()
-            }
-        }
-        refreshMenu()
+    private func keyCount() -> UInt32 {
+        CGEventSource.counterForEventType(.combinedSessionState, eventType: .keyDown)
     }
 
-    /// 전역 마우스 이벤트의 좌표는 **화면 좌표**이고 원점이 왼쪽 아래다.
+    private func clickCount() -> UInt32 {
+        CGEventSource.counterForEventType(.combinedSessionState, eventType: .leftMouseDown)
+            &+ CGEventSource.counterForEventType(.combinedSessionState, eventType: .rightMouseDown)
+    }
+
+    private func startEavesdropping() {
+        lastKeys = keyCount()
+        lastClicks = clickCount()
+
+        // 60 번쯤 보면 클릭한 자리와 실제 커서 자리가 눈에 띄게 어긋나지 않는다.
+        inputTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            self?.pollInput()
+        }
+        debugLog("엿듣기 시작 (권한 불필요) 키=\(lastKeys) 클릭=\(lastClicks)")
+    }
+
+    private func pollInput() {
+        let keys = keyCount()
+        let clicks = clickCount()
+
+        // 밥을 안 주는 동안에도 숫자는 흐른다. 따라만 두지 않으면 다시 켤 때
+        // 그동안 친 것이 한꺼번에 쏟아진다.
+        guard gameMode, window.isVisible, !panelOpen else {
+            lastKeys = keys
+            lastClicks = clicks
+            return
+        }
+
+        if clicks != lastClicks {
+            // 위치는 커서에게 물어본다 — 이것도 권한이 필요 없다.
+            heardClick(at: NSEvent.mouseLocation)
+        }
+        if keys != lastKeys {
+            // **몇 번 쳤든 한 번만 알린다.** 게임 쪽에서 어차피 간격으로 걸러낸다.
+            heardTyping()
+        }
+
+        lastKeys = keys
+        lastClicks = clicks
+    }
+
+    /// 커서 위치는 **화면 좌표**이고 원점이 왼쪽 아래다.
     /// 웹뷰는 창 안의 왼쪽 위 기준이라 두 번 옮겨야 한다.
     private func heardClick(at screenPoint: NSPoint) {
-        guard gameMode, window.isVisible, !panelOpen else { return }
-
         let frame = window.frame
         guard NSPointInRect(screenPoint, frame) else { return }
 
@@ -431,32 +465,8 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
     }
 
     private func heardTyping() {
-        guard gameMode, window.isVisible, !panelOpen else { return }
         // 어디를 쳤는지는 알 수 없고 알 것도 없다 — 자리는 게임이 정한다.
         webView.evaluateJavaScript("window.__sharkType && window.__sharkType()")
-    }
-
-    /// 권한 없이는 타자가 밥이 안 된다. 한 번만 물어보고, 뒤로는 메뉴에서 열 수 있다.
-    @objc private func askForAccessibility() {
-        let alert = NSAlert()
-        alert.messageText = "타자를 밥으로 바꾸려면 권한이 필요합니다"
-        alert.informativeText = """
-        「손쉬운 사용」에 이 앱을 넣어 주세요. 키를 **엿듣기만** 하고 가로채지 않습니다 —
-        치던 글자는 그대로 찍히고, 어떤 키를 눌렀는지는 게임에 전달되지 않습니다
-        (몇 번 쳤는지만 셉니다).
-
-        허용한 뒤에는 앱을 한 번 껐다 켜야 합니다.
-        """
-        alert.addButton(withTitle: "설정 열기")
-        alert.addButton(withTitle: "나중에")
-        alert.alertStyle = .informational
-
-        NSApp.activate(ignoringOtherApps: true)
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-
-        let url = URL(string:
-            "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
-        NSWorkspace.shared.open(url)
     }
 
     // MARK: 입력
@@ -522,15 +532,13 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
         panelOpen = open
         webView.evaluateJavaScript("window.__sharkPanel && window.__sharkPanel(\(open))")
 
-        // 패널은 눌러야 하고 별명은 쳐야 한다. **패널을 열 때만** 마우스와 포커스를
-        // 가져가고, 닫으면 곧장 쓰던 앱으로 돌려준다. 그 밖에는 클릭이 늘 통과한다.
+        // **패널을 열어도 키보드는 안 가져간다.**
+        //
+        // 예전에는 열자마자 앱을 활성화했는데, 그러면 패널을 띄워 둔 채로 다른 창에
+        // 한 글자도 못 친다 — 랭킹을 보면서 일할 수가 없다. 지금은 **마우스만** 받고
+        // (버튼을 눌러야 하니까), 키보드는 별명 칸을 실제로 눌렀을 때만 가져온다.
         updateMousePass()
-        if open {
-            NSApp.activate(ignoringOtherApps: true)
-            window.makeKeyAndOrderFront(nil)
-        } else {
-            NSApp.deactivate()
-        }
+        if !open { releaseKeyboard() }
     }
 
     /// **창이 마우스를 받는 것은 패널이 열렸을 때뿐이다.**
@@ -543,6 +551,23 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
         passingThrough = wantPass
         window.ignoresMouseEvents = wantPass
         debugLog("pass \(wantPass)")
+    }
+
+    /// 별명 칸을 눌렀다. 이제서야 키보드를 가져온다.
+    private func grabKeyboard() {
+        guard !holdingKeyboard else { return }
+        holdingKeyboard = true
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        debugLog("키보드 가져옴")
+    }
+
+    /// 별명 칸에서 손을 뗐거나 패널을 닫았다. 쓰던 앱으로 돌려준다.
+    private func releaseKeyboard() {
+        guard holdingKeyboard else { return }
+        holdingKeyboard = false
+        NSApp.deactivate()
+        debugLog("키보드 돌려줌")
     }
 
     @objc private func toggleWindow() {
@@ -583,6 +608,17 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
 
         case "closePanel":
             setPanel(false)
+
+        case "grabKeyboard":
+            grabKeyboard()
+
+        case "releaseKeyboard":
+            releaseKeyboard()
+
+        case "dex":
+            if let value = body["species"] as? String { species = value }
+            if let list = body["collected"] as? [String] { collected = list }
+            refreshMenu()
 
         case "status":
             let stage = body["stage"] as? Int ?? 1

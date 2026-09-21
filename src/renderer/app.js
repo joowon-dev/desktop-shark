@@ -5,15 +5,16 @@
 
 import { DT } from '../game/constants.js'
 import {
-  createEngine, feedAt, feedTyped, setBounds, setGameMode, snapshot, step,
+  createEngine, feedAt, feedTyped, releaseAndNext, setBounds, setGameMode, snapshot, step,
 } from '../game/engine.js'
+import { SPECIES, SPECIES_ORDER, isComplete, speciesOf } from '../game/species.js'
 import { hungerLabel } from '../game/hunger.js'
 import { toNextStage } from '../game/growth.js'
 import {
   defaultNickname, dropBatch, mergeEaten, newSecret, nextBatch,
   parseRecoveryCode, recoveryCode,
 } from '../game/sync.js'
-import { draw } from '../render/draw.js'
+import { draw, drawSharkBody } from '../render/draw.js'
 import {
   feedShark, myShark, randomBytes, registerPlayer, setNickname, sharkRanking, verifyCode,
 } from '../net/ranking.js'
@@ -102,6 +103,13 @@ function afterStep() {
     ripples.push({ x: mouthX, y: mouthY, age: 0, duration: 1.1, maxRadius: 0.12 })
     saveState()
     flashHud()
+
+    // 방금 6단계에 닿아 도감에 올랐으면 그것도 저장한다.
+    if (engine.collected.length !== collectedCount) {
+      collectedCount = engine.collected.length
+      saveDex()
+      if (!panel.hidden) refreshDex()
+    }
   }
 }
 
@@ -168,6 +176,7 @@ if (!bridge) {
  * 된다. 방금 무슨 일이 일어났는지만 알려 주고 사라지는 편이 낫다.
  */
 let hudTimer = null
+let collectedCount = 0
 
 function flashHud() {
   refreshHud()
@@ -192,7 +201,9 @@ bridge?.onGameMode?.((on) => applyGameMode(on))
 // (별명을 타이핑해야 한다) 셸 쪽이 먼저 알아야 하기 때문이다.
 bridge?.onPanel?.((open) => {
   panel.hidden = !open
-  if (open && rankingOn) refreshRanking()
+  if (!open) return
+  refreshDex()
+  if (rankingOn && !document.getElementById('tab-rank').hidden) refreshRanking()
 })
 
 /** 셸이 저장해 둔 랭킹 스위치를 받아 온다. */
@@ -218,6 +229,121 @@ function applyRanking(on, save) {
   panel.classList.toggle('ranking-off', !rankingOn)
   if (save) bridge?.saveRanking?.(rankingOn)
   if (rankingOn && !panel.hidden) refreshRanking()
+}
+
+// MARK: 도감
+
+/** 도감을 다시 그린다. 지금 키우는 종은 테두리가 돈다. */
+function refreshDex() {
+  const snap = snapshot(engine)
+  const list = document.getElementById('dex-list')
+  list.innerHTML = ''
+
+  for (const key of SPECIES_ORDER) {
+    const known = snap.collected.includes(key) || key === snap.species
+    const card = document.createElement('div')
+    card.className = `dex-card${known ? '' : ' locked'}${key === snap.species ? ' now' : ''}`
+    card.title = known ? SPECIES[key].hint : '아직 만나지 않았습니다'
+
+    const canvas = document.createElement('canvas')
+    const dpr = window.devicePixelRatio || 1
+    const w = 90
+    const h = 46
+    canvas.width = Math.round(w * dpr)
+    canvas.height = Math.round(h * dpr)
+    const c = canvas.getContext('2d')
+    c.setTransform(dpr, 0, 0, dpr, 0, 0)
+    c.translate(w / 2, h / 2)
+    c.scale(w * 0.82, w * 0.82)
+    // **화면의 상어와 같은 함수로 그린다.** 다르면 도감이 아니다.
+    drawSharkBody(c, key, 6, known ? 0.92 : 0.5, 0, 0)
+    card.appendChild(canvas)
+
+    const label = document.createElement('div')
+    label.className = 'label'
+    label.textContent = known ? SPECIES[key].name : '???'
+    card.appendChild(label)
+
+    list.appendChild(card)
+  }
+
+  const now = speciesOf(snap.species)
+  const done = snap.collected.length
+  document.getElementById('dex-now').textContent = isComplete(snap.collected)
+    ? `도감을 다 채웠습니다. 지금은 ${now.name} 을 키웁니다.`
+    : `${done} / ${SPECIES_ORDER.length} — 지금은 ${now.name}, ${snap.stage}단계`
+
+  // 다 키운 상어만 놓아줄 수 있다.
+  document.getElementById('release').hidden = snap.stage < 6
+}
+
+document.getElementById('release').addEventListener('click', () => {
+  const before = speciesOf(engine.species).name
+  engine = releaseAndNext(engine, Date.now())
+  saveState()
+  saveDex()
+  refreshDex()
+  flashHud()
+  document.getElementById('dex-now').textContent =
+    `${before} 을 놓아주었습니다. ${speciesOf(engine.species).name} 아기상어가 왔습니다.`
+})
+
+function saveDex() {
+  bridge?.saveDex?.({ species: engine.species, collected: engine.collected })
+}
+
+// MARK: 탭
+
+for (const tab of document.querySelectorAll('.tab')) {
+  tab.addEventListener('click', () => {
+    for (const other of document.querySelectorAll('.tab')) other.classList.toggle('on', other === tab)
+    document.getElementById('tab-dex').hidden = tab.dataset.tab !== 'dex'
+    document.getElementById('tab-rank').hidden = tab.dataset.tab !== 'rank'
+    if (tab.dataset.tab === 'dex') refreshDex()
+    else if (rankingOn) refreshRanking()
+  })
+}
+
+// MARK: 패널 옮기기
+//
+// 창틀이 없으니 제목줄을 손잡이로 쓴다. 자리는 기억하지 않는다 — 화면 크기가 바뀌면
+// 기억한 자리가 화면 밖일 수 있고, 그러면 패널을 영영 못 찾는다.
+
+;(() => {
+  const grip = document.getElementById('grip')
+  let dragging = null
+
+  grip.addEventListener('pointerdown', (event) => {
+    if (event.target.id === 'close-panel') return
+    const box = panel.getBoundingClientRect()
+    dragging = { dx: event.clientX - box.left, dy: event.clientY - box.top }
+    grip.setPointerCapture(event.pointerId)
+  })
+
+  grip.addEventListener('pointermove', (event) => {
+    if (!dragging) return
+    const box = panel.getBoundingClientRect()
+    // 화면 밖으로 끌어내지 못하게 막는다. 한 번 나가면 잡을 데가 없다.
+    const x = Math.max(0, Math.min(window.innerWidth - box.width, event.clientX - dragging.dx))
+    const y = Math.max(0, Math.min(window.innerHeight - box.height, event.clientY - dragging.dy))
+    panel.style.left = `${x}px`
+    panel.style.top = `${y}px`
+    panel.style.transform = 'none'
+  })
+
+  for (const type of ['pointerup', 'pointercancel']) {
+    grip.addEventListener(type, () => { dragging = null })
+  }
+})()
+
+// MARK: 별명 칸 — 여기를 누를 때만 키보드를 가져온다
+//
+// 패널을 열자마자 키보드를 가져가면 랭킹을 보면서 다른 창에 한 글자도 못 친다.
+
+for (const id of ['nickname', 'code']) {
+  const input = document.getElementById(id)
+  input.addEventListener('focus', () => bridge?.grabKeyboard?.())
+  input.addEventListener('blur', () => bridge?.releaseKeyboard?.())
 }
 
 // MARK: 서버 — 없어도 게임은 전부 된다
@@ -400,10 +526,13 @@ async function start() {
   engine = createEngine({
     eaten: saved.eaten ?? 0,
     lastFedAt: saved.lastFedAt ?? null,
+    species: saved.species,
+    collected: saved.collected ?? [],
     seed: (Date.now() & 0xffff) | 1,
     bounds: engine.bounds,
     now: Date.now(),
   })
+  collectedCount = engine.collected.length
 
   if (saved.ranking === false) applyRanking(false, false)
 

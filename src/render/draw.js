@@ -8,6 +8,7 @@
 
 import { foodAlpha } from '../game/food.js'
 import { detailOf } from '../game/growth.js'
+import { speciesOf } from '../game/species.js'
 
 /** 상어는 검은 실루엣이다. 색을 주면 그림이 되고, 그림이 되면 무섭지 않다. */
 const INK = '0, 8, 14'
@@ -45,45 +46,90 @@ export function draw(ctx, view, snap, extras = {}) {
 /**
  * 몸의 윤곽. 길이를 1 로 본 국소 좌표이고, 코가 +x 쪽이다.
  * 위쪽(-y)이 등, 아래쪽(+y)이 배.
+ *
+ * **종마다 이 한 벌을 비율로 늘이고 줄인다.** 여섯 벌을 따로 그려 두면 한 종만
+ * 고쳐도 나머지가 어긋난다.
  */
-function bodyOutline(detail) {
+function bodyOutline(detail, species) {
+  const d = species.depth
+  const n = species.snout
+  const t = species.tail
+
   const points = [
-    { x: 0.50, y: 0.000 },   // 코끝
-    { x: 0.40, y: -0.055 },
-    { x: 0.24, y: -0.098 },
-    { x: 0.05, y: -0.115 },
-    { x: -0.14, y: -0.100 },
-    { x: -0.30, y: -0.065 },
-    { x: -0.38, y: -0.040 },
+    { x: 0.50, y: 0.000 },                        // 코끝
+    { x: 0.50 - 0.10 * n, y: -0.055 * d },
+    { x: 0.50 - 0.26 * n, y: -0.098 * d },
+    { x: 0.05, y: -0.115 * d },
+    { x: -0.14, y: -0.100 * d },
+    { x: -0.30, y: -0.065 * d },
+    { x: -0.38, y: -0.040 * d },
     // 꼬리 — 위 갈래가 길다. 상어의 꼬리는 좌우가 다르다.
-    { x: -0.50, y: -0.230 },
+    //
+    // **위 갈래는 점 두 개로 그린다.** 한 점으로 뾰족하게 두면 중점 곡선 보간이
+    // 이웃 점 쪽으로 반쯤 끌어당겨서, 환도상어의 긴 꼬리가 백상아리와 똑같아진다.
+    { x: -0.41 - 0.04 * t, y: -0.110 * t },
+    { x: -0.44 - 0.08 * t, y: -0.250 * t },
     { x: -0.44, y: -0.070 },
     { x: -0.42, y: 0.000 },
     { x: -0.44, y: 0.060 },
-    { x: -0.50, y: 0.150 },
+    { x: -0.46 - 0.04 * t, y: 0.150 * (0.6 + 0.4 * t) },
     { x: -0.38, y: 0.035 },
-    { x: -0.30, y: 0.060 },
-    { x: -0.14, y: 0.095 },
-    { x: 0.05, y: 0.105 },
-    { x: 0.24, y: 0.088 },
-    { x: 0.40, y: 0.048 },
+    { x: -0.30, y: 0.060 * d },
+    { x: -0.14, y: 0.095 * d },
+    { x: 0.05, y: 0.105 * d },
+    { x: 0.50 - 0.26 * n, y: 0.088 * d },
+    { x: 0.50 - 0.10 * n, y: 0.048 * d },
   ]
   if (!detail.tailFin) return points.filter((p) => p.x > -0.42)
   return points
 }
 
 /**
+ * 귀상어의 망치 머리 — 코앞에 **모서리가 선 판**이 가로로 붙어 있다.
+ *
+ * 둥글게 그리면 혹이 달린 상어가 된다. 곧은 변으로 그려야 망치로 읽힌다.
+ */
+function hammerHead(species) {
+  const x = 0.50 - 0.10 * species.snout
+  return [
+    { x: x - 0.01, y: -0.090 },
+    { x: x + 0.09, y: -0.150 },
+    { x: x + 0.13, y: -0.125 },
+    { x: x + 0.13, y: 0.125 },
+    { x: x + 0.09, y: 0.150 },
+    { x: x - 0.01, y: 0.090 },
+  ]
+}
+
+/** 톱상어의 코 — 길게 뻗고 양옆에 이가 났다. */
+function sawSnout(species) {
+  const base = 0.50 - 0.10 * species.snout
+  const tip = base + 0.34
+  const points = [{ x: base, y: -0.030 }, { x: tip, y: -0.012 }, { x: tip, y: 0.012 }, { x: base, y: 0.030 }]
+  // 톱니는 따로 조각으로 얹는다.
+  const teeth = []
+  for (let i = 0; i < 6; i += 1) {
+    const x = base + 0.05 + i * 0.048
+    teeth.push([{ x, y: -0.016 }, { x: x + 0.012, y: -0.052 }, { x: x + 0.024, y: -0.016 }])
+    teeth.push([{ x: x + 0.012, y: 0.016 }, { x: x + 0.024, y: 0.052 }, { x: x + 0.036, y: 0.016 }])
+  }
+  return [points, ...teeth]
+}
+
+/**
  * 지느러미들. 각각 닫힌 삼각형이고 **밑동 두 점이 몸통 윤곽 안쪽에 있다** —
  * 밖에 두면 몸에서 떨어져 알처럼 떠 있는다. 처음에 그렇게 그려 놓고 한참 못 알아봤다.
  */
-function fins(detail) {
+function fins(detail, species) {
   const list = []
+  const h = species.dorsal
+  const d = species.depth
   if (detail.dorsalFin) {
     // 등지느러미 — 이것이 수면을 가른다. 뒤로 눕고 뒷변이 오목하다.
-    list.push([{ x: 0.12, y: -0.080 }, { x: 0.02, y: -0.320 }, { x: -0.10, y: -0.060 }])
+    list.push([{ x: 0.12, y: -0.080 * d }, { x: 0.02, y: -0.320 * h }, { x: -0.10, y: -0.060 * d }])
   }
   if (detail.secondDorsal) {
-    list.push([{ x: -0.20, y: -0.060 }, { x: -0.26, y: -0.145 }, { x: -0.31, y: -0.040 }])
+    list.push([{ x: -0.20, y: -0.060 * d }, { x: -0.26, y: -0.145 * h }, { x: -0.31, y: -0.040 * d }])
   }
   if (detail.pectoralFins) {
     // 가슴지느러미 — 낫처럼 길고 뒤로 눕는다.
@@ -110,10 +156,8 @@ function bend(point, phase, amount) {
 }
 
 function drawShark(ctx, view, snap) {
-  const { swimmer, length, alpha, elapsed, speed } = {
-    ...snap, speed: snap.swimmer.speed,
-  }
-  const detail = detailOf(snap.stage)
+  const { swimmer, length, alpha, elapsed } = snap
+  const speed = snap.swimmer.speed
   const size = length * view.scale
 
   // 빨리 헤엄칠수록 자주, 크게 흔든다.
@@ -124,6 +168,18 @@ function drawShark(ctx, view, snap) {
   ctx.translate(swimmer.x * view.scale, swimmer.y * view.scale)
   ctx.rotate(swimmer.heading)
   ctx.scale(size, size)
+  drawSharkBody(ctx, snap.species, snap.stage, alpha, phase, amount)
+  ctx.restore()
+}
+
+/**
+ * 길이 1 로 정규화된 상어 한 마리. 옮기고 돌리고 키우는 것은 부르는 쪽이 한다.
+ *
+ * **도감도 이 함수를 쓴다.** 도감의 그림과 화면의 상어가 다르면 도감이 아니다.
+ */
+export function drawSharkBody(ctx, speciesKey, stage, alpha, phase = 0, amount = 0) {
+  const detail = detailOf(stage)
+  const species = speciesOf(speciesKey)
 
   ctx.fillStyle = `rgba(${INK}, ${alpha})`
 
@@ -131,10 +187,15 @@ function drawShark(ctx, view, snap) {
   // 따로 칠하면 겹치는 자리에서 반투명이 두 번 쌓여 지느러미 밑동에 이음매가 비친다.
   // nonzero 감김 규칙이 겹친 부분을 하나로 메워서 그 자국이 사라진다.
   ctx.beginPath()
-  addSmooth(ctx, bodyOutline(detail).map((p) => bend(p, phase, amount)))
+  addSmooth(ctx, bodyOutline(detail, species).map((p) => bend(p, phase, amount)))
   // 지느러미는 **곡선으로 잇지 않는다.** 삼각형을 중점 곡선으로 그리면 알처럼 뭉개진다.
-  for (const fin of fins(detail)) {
+  for (const fin of fins(detail, species)) {
     addSharp(ctx, fin.map((p) => bend(p, phase, amount)))
+  }
+  // 종마다 붙는 것. 머리와 코는 안 흔들린다 — bend 의 무게가 0 이라 그대로 둬도 같다.
+  if (species.extras.includes('hammer')) addSharp(ctx, hammerHead(species))
+  if (species.extras.includes('saw')) {
+    for (const piece of sawSnout(species)) addSharp(ctx, piece)
   }
   ctx.fill()
 
@@ -142,16 +203,20 @@ function drawShark(ctx, view, snap) {
   ctx.globalCompositeOperation = 'destination-out'
   ctx.lineCap = 'round'
 
-  // 눈
+  // 눈 — 귀상어는 머리 끝에 달려 있다.
+  const eyeX = species.extras.includes('hammer') ? 0.50 - 0.10 * species.snout + 0.095 : 0.325
   ctx.beginPath()
-  ctx.arc(0.325, -0.042, 0.020, 0, Math.PI * 2)
+  const eyeY = species.extras.includes('hammer') ? -0.118 : -0.042 * species.depth
+  ctx.arc(eyeX, eyeY, 0.020, 0, Math.PI * 2)
   ctx.fillStyle = 'rgba(0,0,0,1)'
   ctx.fill()
 
   // 입 — 상어의 인상은 거의 이 한 줄에서 나온다. 코 밑에서 비스듬히 뒤로 째진다.
+  // 입도 코 길이를 따라 앞뒤로 움직인다.
+  const shift = (0.50 - 0.10 * species.snout) - 0.40
   ctx.beginPath()
-  ctx.moveTo(MOUTH.x0, MOUTH.y0)
-  ctx.lineTo(MOUTH.x1, MOUTH.y1)
+  ctx.moveTo(MOUTH.x0 + shift, MOUTH.y0)
+  ctx.lineTo(MOUTH.x1 + shift, MOUTH.y1)
   ctx.lineWidth = 0.012
   ctx.strokeStyle = 'rgba(0,0,0,1)'
   ctx.stroke()
@@ -190,16 +255,14 @@ function drawShark(ctx, view, snap) {
     ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`
     ctx.beginPath()
     for (let i = 0; i < 4; i += 1) {
-      const x = 0.440 - i * 0.036
-      const y = mouthLineY(x)
+      const x = 0.440 + shift - i * 0.036
+      const y = mouthLineY(x - shift)
       ctx.moveTo(x, y - 0.004)
       ctx.lineTo(x - 0.026, y + 0.002)
       ctx.lineTo(x - 0.013, y + 0.022)
     }
     ctx.fill()
   }
-
-  ctx.restore()
 }
 
 /**
@@ -263,8 +326,9 @@ function drawWake(ctx, view, snap, all) {
     if (life <= 0) continue
     const spread = (1 - life) * 0.03 * view.scale
 
-    ctx.strokeStyle = `rgba(255, 255, 255, ${life * snap.alpha * 0.5})`
-    ctx.lineWidth = Math.max(1, life * 0.012 * view.scale)
+    // **아주 연하다.** 물자국이 상어보다 눈에 띄면 화면에 흰 줄이 그어진 것으로 보인다.
+    ctx.strokeStyle = `rgba(255, 255, 255, ${life * snap.alpha * 0.13})`
+    ctx.lineWidth = Math.max(0.6, life * 0.006 * view.scale)
 
     for (const side of [-1, 1]) {
       ctx.beginPath()
@@ -286,8 +350,8 @@ function drawRipples(ctx, view, ripples) {
     const radius = (1 - life) * r.maxRadius * view.scale
     ctx.beginPath()
     ctx.arc(r.x * view.scale, r.y * view.scale, radius, 0, Math.PI * 2)
-    ctx.strokeStyle = `rgba(255, 255, 255, ${life * 0.45})`
-    ctx.lineWidth = Math.max(1, life * 0.006 * view.scale)
+    ctx.strokeStyle = `rgba(255, 255, 255, ${life * 0.16})`
+    ctx.lineWidth = Math.max(0.6, life * 0.004 * view.scale)
     ctx.stroke()
   }
 }
@@ -307,21 +371,23 @@ function drawFood(ctx, view, food) {
     // 상어가 큰 것부터 노리는 이유가 화면에 보여야 한다.
     const r = (f.radius ?? 0.007) * view.scale
 
+    // **거의 안 보인다.** 밥은 일하는 화면 위에 늘 떠 있는 것이라, 보이는 순간
+    // 거슬린다. 상어가 그쪽으로 헤엄쳐 오는 것으로 「저기에 밥이 있다」를 안다.
     ctx.beginPath()
-    ctx.arc(x, y, r * 2.6, 0, Math.PI * 2)
-    ctx.fillStyle = `rgba(255, 240, 190, ${alpha * 0.16})`
+    ctx.arc(x, y, r * 2.2, 0, Math.PI * 2)
+    ctx.fillStyle = `rgba(255, 240, 190, ${alpha * 0.05})`
     ctx.fill()
 
     ctx.beginPath()
     ctx.arc(x, y, r, 0, Math.PI * 2)
-    ctx.fillStyle = `rgba(255, 228, 150, ${alpha * 0.9})`
+    ctx.fillStyle = `rgba(255, 232, 170, ${alpha * 0.30})`
     ctx.fill()
 
     // 큰 밥에만 심지 하나 — 작게 줄어도 두 종류가 구별된다.
     if (f.kind === 'big') {
       ctx.beginPath()
       ctx.arc(x - r * 0.3, y - r * 0.3, r * 0.34, 0, Math.PI * 2)
-      ctx.fillStyle = `rgba(255, 252, 235, ${alpha * 0.85})`
+      ctx.fillStyle = `rgba(255, 252, 235, ${alpha * 0.34})`
       ctx.fill()
     }
   }

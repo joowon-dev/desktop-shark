@@ -44,8 +44,8 @@ export const MAX_FOOD = 10
  * 상어가 먹으러 오는 것이 보이면 충분하다. 둘 다 손맛이다.
  */
 export const FOOD_KINDS = {
-  big: { value: 10, radius: 0.0075 },
-  small: { value: 1, radius: 0.0035 },
+  big: { value: 10, radius: 0.0055 },
+  small: { value: 1, radius: 0.0026 },
 }
 
 /**
@@ -57,8 +57,18 @@ export const TYPE_FEED_INTERVAL = 0.6
 export const FOOD_LIFETIME = 20
 /** 밥이 가라앉는 속도(화면 짧은 변 대비 비율/초). 손맛. */
 export const FOOD_SINK_SPEED = 0.02
-/** 상어 입이 밥에 이만큼 가까우면 먹은 것으로 친다(화면 짧은 변 대비). 손맛. */
-export const EAT_RADIUS = 0.025
+/**
+ * 먹힘 판정의 **최소** 반경(화면 짧은 변 대비). 아기상어가 밥을 영영 못 무는 것을 막는다.
+ */
+export const EAT_RADIUS = 0.012
+
+/**
+ * 입의 크기는 몸 길이에 비례한다 — 몸 길이의 이만큼.
+ *
+ * 고정값으로 두면 상어를 줄였을 때 **입이 몸보다 커진다.** 아기상어가 제 몸 길이의
+ * 두 배 떨어진 밥을 삼키면 헤엄쳐 가서 무는 장면이 사라진다.
+ */
+export const EAT_REACH = 0.45
 
 // MARK: 배고픔
 
@@ -100,8 +110,13 @@ export const SATED_DURATION = 6
  */
 export const STAGE_THRESHOLDS = [0, 30, 100, 250, 550, 1000]
 
-/** 단계별 몸 길이 (화면 짧은 변 대비 비율). 손맛. */
-export const STAGE_LENGTHS = [0.06, 0.09, 0.13, 0.18, 0.24, 0.32]
+/**
+ * 단계별 몸 길이 (화면 짧은 변 대비 비율). 손맛.
+ *
+ * **작다.** 바탕화면 위를 지나가는 것이라 크면 화면을 가린다 — 다 큰 백상아리가
+ * 화면 높이의 1/8 쯤이다. 종마다 여기에 배율이 한 번 더 곱해진다.
+ */
+export const STAGE_LENGTHS = [0.022, 0.030, 0.041, 0.056, 0.074, 0.095]
 
 /** 단계별 기본 선명도. 많이 먹일수록 또렷해진다. 손맛. */
 export const STAGE_ALPHAS = [0.18, 0.24, 0.31, 0.39, 0.47, 0.55]

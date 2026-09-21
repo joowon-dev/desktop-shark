@@ -97,10 +97,22 @@ describe('nearestFood', () => {
 })
 
 describe('canEat', () => {
-  it(`입에서 ${EAT_RADIUS} 안이면 먹는다`, () => {
+  it(`반경을 안 주면 최소 반경 ${EAT_RADIUS} 을 쓴다`, () => {
     const mouth = { x: 0.5, y: 0.5 }
     expect(canEat(createFood(1, 0.5, 0.5 + EAT_RADIUS * 0.9), mouth)).toBe(true)
     expect(canEat(createFood(1, 0.5, 0.5 + EAT_RADIUS * 1.1), mouth)).toBe(false)
+  })
+
+  it('큰 상어는 입도 크다', () => {
+    const mouth = { x: 0.5, y: 0.5 }
+    const far = createFood(1, 0.5, 0.5 + 0.05)
+    expect(canEat(far, mouth, 0.08)).toBe(true)
+    expect(canEat(far, mouth, 0.02)).toBe(false)
+  })
+
+  it('아무리 작아도 최소 반경 아래로는 안 내려간다 — 아기상어가 영영 못 문다', () => {
+    const mouth = { x: 0.5, y: 0.5 }
+    expect(canEat(createFood(1, 0.5, 0.5 + EAT_RADIUS * 0.5), mouth, 0.0001)).toBe(true)
   })
 
   it('밥이 없으면 못 먹는다', () => {

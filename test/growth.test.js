@@ -40,6 +40,13 @@ describe('크기와 선명도', () => {
     }
   })
 
+  it('상어는 작다 — 다 커도 화면 높이의 1/7 을 안 넘는다', () => {
+    // 크면 바탕화면을 가린다. 종 배율이 제일 큰 고래상어까지 세어 본다.
+    expect(lengthOf(6) * 1.45).toBeLessThan(1 / 7)
+    // 그리고 아기상어가 점으로 보이면 안 된다.
+    expect(lengthOf(1)).toBeGreaterThan(0.02)
+  })
+
   it('1단계는 흐릿하고 6단계도 바탕화면을 가리지 않는다', () => {
     expect(baseAlphaOf(1)).toBeLessThan(0.25)
     expect(baseAlphaOf(6)).toBeLessThan(0.6)
