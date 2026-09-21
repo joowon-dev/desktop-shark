@@ -1,0 +1,342 @@
+// 그리기 전부. 게임 상태를 받아 캔버스에 옮긴다 — 규칙은 여기 없다.
+//
+// **레티나 배율을 지우지 않는다.** 불꽃놀이에서 draw() 가 setTransform 으로 배율을
+// 되돌려 화면 왼쪽 위 1/4 에만 그려지던 버그가 초록 테스트를 뚫고 살아남았다.
+// 여기서는 배율을 app.js 가 한 번만 걸고, 이 파일은 절대 setTransform 을 부르지 않는다.
+//
+// 좌표는 정규 좌표(화면 짧은 변 = 1)로 들어와서 `scale` 로 픽셀이 된다.
+
+import { foodAlpha } from '../game/food.js'
+import { detailOf } from '../game/growth.js'
+
+/** 상어는 검은 실루엣이다. 색을 주면 그림이 되고, 그림이 되면 무섭지 않다. */
+const INK = '0, 8, 14'
+
+/** 입선. 이빨이 이 선 위에 앉아야 해서 한 곳에 적어 두고 둘이 같이 본다. */
+const MOUTH = { x0: 0.468, y0: 0.012, x1: 0.288, y1: 0.060 }
+
+function mouthLineY(x) {
+  const t = (MOUTH.x0 - x) / (MOUTH.x0 - MOUTH.x1)
+  return MOUTH.y0 + (MOUTH.y1 - MOUTH.y0) * t
+}
+
+/**
+ * 한 프레임.
+ *
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {object} view { width, height, scale } — CSS 픽셀 기준
+ * @param {object} snap engine.snapshot()
+ * @param {object} extras { ripples, wake }
+ */
+export function draw(ctx, view, snap, extras = {}) {
+  ctx.clearRect(0, 0, view.width, view.height)
+
+  if (snap.gameMode) drawGameModeEdge(ctx, view)
+  drawRipples(ctx, view, extras.ripples ?? [])
+  drawFood(ctx, view, snap.food)
+
+  if (snap.alpha > 0.001) {
+    drawWake(ctx, view, snap, extras.wake ?? [])
+    drawShark(ctx, view, snap)
+  }
+}
+
+// MARK: 상어
+
+/**
+ * 몸의 윤곽. 길이를 1 로 본 국소 좌표이고, 코가 +x 쪽이다.
+ * 위쪽(-y)이 등, 아래쪽(+y)이 배.
+ */
+function bodyOutline(detail) {
+  const points = [
+    { x: 0.50, y: 0.000 },   // 코끝
+    { x: 0.40, y: -0.055 },
+    { x: 0.24, y: -0.098 },
+    { x: 0.05, y: -0.115 },
+    { x: -0.14, y: -0.100 },
+    { x: -0.30, y: -0.065 },
+    { x: -0.38, y: -0.040 },
+    // 꼬리 — 위 갈래가 길다. 상어의 꼬리는 좌우가 다르다.
+    { x: -0.50, y: -0.230 },
+    { x: -0.44, y: -0.070 },
+    { x: -0.42, y: 0.000 },
+    { x: -0.44, y: 0.060 },
+    { x: -0.50, y: 0.150 },
+    { x: -0.38, y: 0.035 },
+    { x: -0.30, y: 0.060 },
+    { x: -0.14, y: 0.095 },
+    { x: 0.05, y: 0.105 },
+    { x: 0.24, y: 0.088 },
+    { x: 0.40, y: 0.048 },
+  ]
+  if (!detail.tailFin) return points.filter((p) => p.x > -0.42)
+  return points
+}
+
+/**
+ * 지느러미들. 각각 닫힌 삼각형이고 **밑동 두 점이 몸통 윤곽 안쪽에 있다** —
+ * 밖에 두면 몸에서 떨어져 알처럼 떠 있는다. 처음에 그렇게 그려 놓고 한참 못 알아봤다.
+ */
+function fins(detail) {
+  const list = []
+  if (detail.dorsalFin) {
+    // 등지느러미 — 이것이 수면을 가른다. 뒤로 눕고 뒷변이 오목하다.
+    list.push([{ x: 0.12, y: -0.080 }, { x: 0.02, y: -0.320 }, { x: -0.10, y: -0.060 }])
+  }
+  if (detail.secondDorsal) {
+    list.push([{ x: -0.20, y: -0.060 }, { x: -0.26, y: -0.145 }, { x: -0.31, y: -0.040 }])
+  }
+  if (detail.pectoralFins) {
+    // 가슴지느러미 — 낫처럼 길고 뒤로 눕는다.
+    list.push([{ x: 0.20, y: 0.040 }, { x: 0.02, y: 0.250 }, { x: 0.07, y: 0.080 }])
+    // 반대쪽은 몸 너머라 짧게 보인다 — 옆에서 본 그림이다. **같은 쪽으로 눕혀야** 한다.
+    // 각도가 엇갈리면 둘이 번개 모양으로 엉켜 상어가 아니라 도형이 된다.
+    list.push([{ x: 0.21, y: 0.020 }, { x: 0.10, y: 0.135 }, { x: 0.14, y: 0.050 }])
+  }
+  if (detail.tailFin) {
+    // 배지느러미
+    list.push([{ x: -0.11, y: 0.060 }, { x: -0.19, y: 0.180 }, { x: -0.23, y: 0.050 }])
+  }
+  return list
+}
+
+/**
+ * 헤엄치는 물결. 꼬리로 갈수록 크게 흔들린다 — 코는 안 흔들린다.
+ * 이 한 줄이 없으면 상어가 아니라 화살표가 미끄러진다.
+ */
+function bend(point, phase, amount) {
+  const fromNose = 0.5 - point.x           // 0(코) .. 1(꼬리)
+  const weight = fromNose * fromNose
+  return { x: point.x, y: point.y + Math.sin(phase - fromNose * 4.2) * amount * weight }
+}
+
+function drawShark(ctx, view, snap) {
+  const { swimmer, length, alpha, elapsed, speed } = {
+    ...snap, speed: snap.swimmer.speed,
+  }
+  const detail = detailOf(snap.stage)
+  const size = length * view.scale
+
+  // 빨리 헤엄칠수록 자주, 크게 흔든다.
+  const phase = elapsed * (6 + speed * 30)
+  const amount = 0.035 + Math.min(0.05, speed * 0.25)
+
+  ctx.save()
+  ctx.translate(swimmer.x * view.scale, swimmer.y * view.scale)
+  ctx.rotate(swimmer.heading)
+  ctx.scale(size, size)
+
+  ctx.fillStyle = `rgba(${INK}, ${alpha})`
+
+  // **몸통과 지느러미를 한 path 에 담아 한 번만 칠한다.**
+  // 따로 칠하면 겹치는 자리에서 반투명이 두 번 쌓여 지느러미 밑동에 이음매가 비친다.
+  // nonzero 감김 규칙이 겹친 부분을 하나로 메워서 그 자국이 사라진다.
+  ctx.beginPath()
+  addSmooth(ctx, bodyOutline(detail).map((p) => bend(p, phase, amount)))
+  // 지느러미는 **곡선으로 잇지 않는다.** 삼각형을 중점 곡선으로 그리면 알처럼 뭉개진다.
+  for (const fin of fins(detail)) {
+    addSharp(ctx, fin.map((p) => bend(p, phase, amount)))
+  }
+  ctx.fill()
+
+  // 아래는 전부 실루엣을 **파내는** 것이다. 검은 덩어리에 구멍이 나야 얼굴이 생긴다.
+  ctx.globalCompositeOperation = 'destination-out'
+  ctx.lineCap = 'round'
+
+  // 눈
+  ctx.beginPath()
+  ctx.arc(0.325, -0.042, 0.020, 0, Math.PI * 2)
+  ctx.fillStyle = 'rgba(0,0,0,1)'
+  ctx.fill()
+
+  // 입 — 상어의 인상은 거의 이 한 줄에서 나온다. 코 밑에서 비스듬히 뒤로 째진다.
+  ctx.beginPath()
+  ctx.moveTo(MOUTH.x0, MOUTH.y0)
+  ctx.lineTo(MOUTH.x1, MOUTH.y1)
+  ctx.lineWidth = 0.012
+  ctx.strokeStyle = 'rgba(0,0,0,1)'
+  ctx.stroke()
+
+  if (detail.gills) {
+    // 완전히 파내면 흰 막대가 된다. 반만 파내서 자국처럼 남긴다.
+    ctx.strokeStyle = 'rgba(0,0,0,0.40)'
+    ctx.lineWidth = 0.007
+    for (let i = 0; i < 4; i += 1) {
+      const x = 0.145 - i * 0.030
+      ctx.beginPath()
+      ctx.moveTo(x, -0.035)
+      ctx.lineTo(x - 0.008, 0.022)
+      ctx.stroke()
+    }
+  }
+  if (detail.scars) {
+    // 옆구리에만 짧게. 등을 가로지르면 지느러미를 자르는 것처럼 보인다.
+    ctx.strokeStyle = 'rgba(0,0,0,0.45)'
+    ctx.lineWidth = 0.009
+    ctx.beginPath()
+    ctx.moveTo(-0.145, -0.010)
+    ctx.lineTo(-0.105, 0.010)
+    ctx.stroke()
+    ctx.beginPath()
+    ctx.moveTo(-0.120, 0.035)
+    ctx.lineTo(-0.090, 0.050)
+    ctx.stroke()
+  }
+
+  ctx.globalCompositeOperation = 'source-over'
+
+  if (detail.teeth) {
+    // 이빨은 파내지 않고 흰 톱니로 얹는다. 실루엣에서 유일하게 검지 않은 곳이다.
+    // **입선 위에 앉혀야 한다** — 아래로 내리면 턱 밖으로 삐져나와 뼈처럼 보인다.
+    ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`
+    ctx.beginPath()
+    for (let i = 0; i < 4; i += 1) {
+      const x = 0.440 - i * 0.036
+      const y = mouthLineY(x)
+      ctx.moveTo(x, y - 0.004)
+      ctx.lineTo(x - 0.026, y + 0.002)
+      ctx.lineTo(x - 0.013, y + 0.022)
+    }
+    ctx.fill()
+  }
+
+  ctx.restore()
+}
+
+/**
+ * 조각들이 **같은 방향으로 감기게** 맞춘다.
+ *
+ * nonzero 감김 규칙은 겹친 자리의 감김 수를 더한다 — 방향이 반대인 두 조각이 겹치면
+ * +1 과 -1 이 0 이 되어 **구멍이 뚫린다.** 가슴지느러미 둘이 정확히 그랬다.
+ * 부호가 음수면 점 순서를 뒤집어 전부 같은 부호로 만든다.
+ */
+function sameWinding(points) {
+  let area = 0
+  for (let i = 0; i < points.length; i += 1) {
+    const a = points[i]
+    const b = points[(i + 1) % points.length]
+    area += a.x * b.y - b.x * a.y
+  }
+  return area < 0 ? [...points].reverse() : points
+}
+
+/** 지금 path 에 곧은 조각을 더한다. 지느러미는 끝이 뾰족해야 한다. */
+function addSharp(ctx, raw) {
+  const points = sameWinding(raw)
+  ctx.moveTo(points[0].x, points[0].y)
+  for (let i = 1; i < points.length; i += 1) ctx.lineTo(points[i].x, points[i].y)
+  ctx.closePath()
+}
+
+/** 지금 path 에 부드러운 조각을 더한다 — 중점을 지나는 2차 곡선. 꺾인 데가 없어야 물고기다. */
+function addSmooth(ctx, raw) {
+  const points = sameWinding(raw)
+  const n = points.length
+  ctx.moveTo((points[0].x + points[n - 1].x) / 2, (points[0].y + points[n - 1].y) / 2)
+  for (let i = 0; i < n; i += 1) {
+    const current = points[i]
+    const next = points[(i + 1) % n]
+    ctx.quadraticCurveTo(current.x, current.y, (current.x + next.x) / 2, (current.y + next.y) / 2)
+  }
+  ctx.closePath()
+}
+
+// MARK: 물살
+
+/**
+ * 지느러미가 지나간 자리. 「수면을 가른다」가 이것 하나로 보인다 —
+ * 상어 자체는 흐릿해도 물살이 지나가면 뭔가 지나갔다는 것을 안다.
+ */
+function drawWake(ctx, view, snap, all) {
+  // 몸통에 깔린 자국은 버린다. 상어가 반투명이라 몸 밑을 지나는 선이 비쳐서
+  // 옆구리에 흐린 얼룩이 생긴다 — 꼬리 뒤에서부터만 그린다.
+  const clear = snap.length * 0.55
+  const wake = all.filter((w) => Math.hypot(w.x - snap.swimmer.x, w.y - snap.swimmer.y) > clear)
+  if (wake.length < 2) return
+
+  ctx.save()
+  ctx.lineCap = 'round'
+  for (let i = 1; i < wake.length; i += 1) {
+    const a = wake[i - 1]
+    const b = wake[i]
+    // 오래된 쪽이 흐리고 넓다 — 퍼지면서 사라진다.
+    const life = 1 - b.age / 1.6
+    if (life <= 0) continue
+    const spread = (1 - life) * 0.03 * view.scale
+
+    ctx.strokeStyle = `rgba(255, 255, 255, ${life * snap.alpha * 0.5})`
+    ctx.lineWidth = Math.max(1, life * 0.012 * view.scale)
+
+    for (const side of [-1, 1]) {
+      ctx.beginPath()
+      ctx.moveTo(a.x * view.scale + Math.sin(a.heading) * -side * spread,
+                 a.y * view.scale + Math.cos(a.heading) * side * spread)
+      ctx.lineTo(b.x * view.scale + Math.sin(b.heading) * -side * spread,
+                 b.y * view.scale + Math.cos(b.heading) * side * spread)
+      ctx.stroke()
+    }
+  }
+  ctx.restore()
+}
+
+/** 먹은 자리에 퍼지는 동심원. */
+function drawRipples(ctx, view, ripples) {
+  for (const r of ripples) {
+    const life = 1 - r.age / r.duration
+    if (life <= 0) continue
+    const radius = (1 - life) * r.maxRadius * view.scale
+    ctx.beginPath()
+    ctx.arc(r.x * view.scale, r.y * view.scale, radius, 0, Math.PI * 2)
+    ctx.strokeStyle = `rgba(255, 255, 255, ${life * 0.45})`
+    ctx.lineWidth = Math.max(1, life * 0.006 * view.scale)
+    ctx.stroke()
+  }
+}
+
+// MARK: 밥
+
+function drawFood(ctx, view, food) {
+  for (const f of food) {
+    const alpha = foodAlpha(f)
+    if (alpha <= 0) continue
+
+    // 가라앉으며 좌우로 흔들린다. id 로 위상을 갈라 여러 개가 같이 안 흔들린다.
+    const wobble = Math.sin(f.age * 3 + f.id) * 0.004
+    const x = (f.x + wobble) * view.scale
+    const y = f.y * view.scale
+    const r = 0.007 * view.scale
+
+    ctx.beginPath()
+    ctx.arc(x, y, r * 2.6, 0, Math.PI * 2)
+    ctx.fillStyle = `rgba(255, 240, 190, ${alpha * 0.16})`
+    ctx.fill()
+
+    ctx.beginPath()
+    ctx.arc(x, y, r, 0, Math.PI * 2)
+    ctx.fillStyle = `rgba(255, 228, 150, ${alpha * 0.9})`
+    ctx.fill()
+  }
+}
+
+// MARK: 게임모드 표시
+
+/**
+ * **게임모드가 켜진 것을 눈으로 알 수 있어야 한다.** 켜진 동안은 밑의 앱을 못 누르는데,
+ * 그걸 모르면 「맥이 고장났다」가 된다. 화면 가장자리에 옅은 물빛이 돈다.
+ */
+function drawGameModeEdge(ctx, view) {
+  const thickness = Math.min(view.width, view.height) * 0.05
+
+  for (const [x0, y0, x1, y1] of [
+    [0, 0, 0, thickness],                                   // 위
+    [0, view.height, 0, view.height - thickness],           // 아래
+    [0, 0, thickness, 0],                                   // 왼쪽
+    [view.width, 0, view.width - thickness, 0],             // 오른쪽
+  ]) {
+    const gradient = ctx.createLinearGradient(x0, y0, x1, y1)
+    gradient.addColorStop(0, 'rgba(90, 190, 230, 0.30)')
+    gradient.addColorStop(1, 'rgba(90, 190, 230, 0)')
+    ctx.fillStyle = gradient
+    ctx.fillRect(0, 0, view.width, view.height)
+  }
+}

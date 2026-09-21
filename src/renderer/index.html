@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src https://xajmblrdkdnqoxfvsfrt.supabase.co"
+    />
+    <title>Desktop Shark</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <!-- 창틀도 배경도 없다. 바탕화면이 곧 물속이라 배경은 칠하지 않는다. -->
+    <canvas id="stage"></canvas>
+
+    <!-- 게임모드에서만 보이는 눈금. 클릭은 안 받는다(밥이 가려지면 안 된다). -->
+    <div id="hud" hidden>
+      <span id="hud-stage">1단계</span>
+      <span class="sep">·</span>
+      <span id="hud-hunger">배부름</span>
+      <span class="sep">·</span>
+      <span id="hud-next">다음까지 5</span>
+    </div>
+
+    <!-- ⌥⇧R 로 여는 패널. 여기만 클릭·타이핑을 받는다. -->
+    <div id="panel" hidden>
+      <h1>바탕화면 상어</h1>
+
+      <section id="account">
+        <p class="muted" id="account-state">계정이 없습니다. 랭킹에 올리려면 이름을 정하세요.</p>
+        <div class="row">
+          <input id="nickname" type="text" maxlength="12" placeholder="별명 (최대 12자)" />
+          <button id="save-nickname">저장</button>
+        </div>
+        <details>
+          <summary>복구 코드</summary>
+          <p class="muted">
+            다른 기기에 옮기거나 <b>몰래 야구와 같은 계정</b>으로 쓰려면 이 코드를 넣으세요.
+          </p>
+          <div class="row">
+            <input id="code" type="text" placeholder="uuid.비밀" />
+            <button id="use-code">불러오기</button>
+          </div>
+          <p class="code" id="my-code"></p>
+        </details>
+      </section>
+
+      <section id="ranking">
+        <h2>랭킹 <span class="muted" id="my-rank"></span></h2>
+        <ol id="ranking-list"><li class="muted">불러오는 중…</li></ol>
+      </section>
+
+      <p class="muted hint">⌥⇧S 게임모드 · ⌥⇧R 이 패널 · ⌥⇧H 숨기기</p>
+    </div>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

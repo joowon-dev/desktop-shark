@@ -1,0 +1,201 @@
+/* 배경은 칠하지 않는다. 바탕화면이 곧 배경이다 — 여기에 색을 넣는 순간 오버레이가 아니다. */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  font-family: -apple-system, "Apple SD Gothic Neo", "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+#stage {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* 눈금만 클릭을 안 받는다 — 눈금 밑에 떨어뜨린 밥이 막히면 안 된다.
+ *
+ * **캔버스는 반드시 클릭을 받아야 한다.** 여기에도 pointer-events: none 을 걸었다가
+ * 밥이 한 번도 안 떨어졌다. 창째로 클릭을 흘려보내는 일은 셸(ignoresMouseEvents)이
+ * 하는 것이고, 페이지 안에서 또 막으면 게임모드를 켜도 아무 일이 일어나지 않는다.
+ * 테스트 92개가 전부 초록인 채로 살아남은 버그다. */
+#hud {
+  pointer-events: none;
+}
+
+#hud {
+  position: fixed;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 7px 16px;
+  border-radius: 999px;
+  background: rgba(8, 24, 34, 0.55);
+  color: rgba(224, 244, 252, 0.92);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  backdrop-filter: blur(8px);
+}
+
+#hud .sep {
+  opacity: 0.35;
+  margin: 0 7px;
+}
+
+/* 패널만 클릭·타이핑을 받는다. */
+#panel {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 340px;
+  max-height: 78vh;
+  overflow-y: auto;
+  padding: 22px;
+  border-radius: 16px;
+  border: 1px solid rgba(120, 200, 235, 0.22);
+  background: rgba(6, 20, 30, 0.88);
+  color: rgba(230, 246, 252, 0.95);
+  font-size: 13px;
+  line-height: 1.55;
+  backdrop-filter: blur(20px);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+
+#panel[hidden],
+#hud[hidden] {
+  display: none;
+}
+
+#panel h1 {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 14px;
+  letter-spacing: 0.01em;
+}
+
+#panel h2 {
+  font-size: 12px;
+  font-weight: 600;
+  margin: 18px 0 8px;
+  opacity: 0.85;
+}
+
+.muted {
+  opacity: 0.55;
+  font-size: 12px;
+}
+
+.hint {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 11px;
+}
+
+.row {
+  display: flex;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+}
+
+input[type="text"]:focus {
+  outline: none;
+  border-color: rgba(120, 200, 235, 0.5);
+}
+
+button {
+  padding: 7px 13px;
+  border-radius: 8px;
+  border: none;
+  background: rgba(90, 190, 230, 0.22);
+  color: rgba(226, 246, 255, 0.95);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: rgba(90, 190, 230, 0.34);
+}
+
+details {
+  margin-top: 10px;
+}
+
+summary {
+  cursor: pointer;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.code {
+  margin-top: 6px;
+  padding: 7px 9px;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.35);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  word-break: break-all;
+  user-select: text;
+  opacity: 0.75;
+}
+
+#ranking-list {
+  list-style: none;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+#ranking-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  font-size: 12px;
+}
+
+#ranking-list li.me {
+  color: rgb(140, 214, 245);
+}
+
+#ranking-list .rank {
+  width: 22px;
+  opacity: 0.5;
+  font-variant-numeric: tabular-nums;
+}
+
+#ranking-list .name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#ranking-list .eaten {
+  opacity: 0.6;
+  font-variant-numeric: tabular-nums;
+}
