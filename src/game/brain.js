@@ -11,7 +11,7 @@ import {
   PROWL_SPEED, SATED_DURATION, SATED_SPEED, TURN_RATE,
 } from './constants.js'
 import { isHungry } from './hunger.js'
-import { nearestFood } from './food.js'
+import { bestFood } from './food.js'
 import { range } from './rng.js'
 
 export const STATES = ['hidden', 'cruise', 'prowl', 'dash', 'eat', 'sated']
@@ -80,7 +80,7 @@ export function intent(brain, ctx) {
     }
 
     case 'dash': {
-      const prey = nearestFood(food, swimmer)
+      const prey = bestFood(food, swimmer)
       // 밥이 방금 사라졌다면 제자리를 가리킨다 — 다음 스텝에서 상태가 바뀐다.
       return {
         target: prey ? { x: prey.x, y: prey.y } : { x: swimmer.x, y: swimmer.y },

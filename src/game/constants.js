@@ -30,8 +30,26 @@ export const SPEED_LERP = 3.0
 
 // MARK: 밥
 
-/** 화면에 동시에 떠 있는 밥의 최대 개수. */
-export const MAX_FOOD = 5
+/** 화면에 동시에 떠 있는 밥의 최대 개수. 타자로도 떨어지므로 넉넉하다. */
+export const MAX_FOOD = 10
+
+/**
+ * 밥 두 종류.
+ *
+ * **클릭은 드물고 일부러 하는 것, 타자는 잦고 무심코 하는 것**이라 값이 달라야 한다.
+ * 같은 값이면 타이핑만으로 몇 분 만에 다 커 버려서 키우는 일이 사라진다.
+ * 값은 손맛이다.
+ */
+export const FOOD_KINDS = {
+  big: { value: 3, radius: 0.012 },
+  small: { value: 1, radius: 0.006 },
+}
+
+/**
+ * 타자로 밥이 떨어지는 최소 간격(초). 연타로 화면을 채우지 않게 막는다.
+ * 손맛 — 0.6 초면 빠르게 쳐도 1 분에 100 개 언저리다.
+ */
+export const TYPE_FEED_INTERVAL = 0.6
 /** 밥이 사라지기까지(초). */
 export const FOOD_LIFETIME = 20
 /** 밥이 가라앉는 속도(화면 짧은 변 대비 비율/초). 손맛. */

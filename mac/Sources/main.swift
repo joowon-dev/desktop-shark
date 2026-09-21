@@ -2,17 +2,25 @@
 //
 // 게임은 전부 web/ 안의 HTML·Canvas·JS다. 이 파일이 하는 일은 그걸 얹을 창을 만드는 것뿐이다:
 // 바탕화면을 덮는 투명 오버레이, 전역 단축키, 메뉴바 아이콘, 저장.
-// 4구(../sneaky-billiards)의 셸과 골격이 같고, **다른 것은 게임모드 하나뿐이다** —
-// 4구는 수식키를 누르고 있는 동안만 마우스를 받지만 상어는 핫키로 켜고 끈다.
+// 4구(../sneaky-billiards)의 셸과 골격이 같고, **다른 것은 밥 주는 방식이다.**
+//
+// **창은 마우스를 절대 안 받는다.** 밥 주기가 켜져 있어도 클릭은 전부 밑의 앱으로
+// 간다 — 그래야 늘 켜 두고 일할 수 있다. 대신 전역 모니터로 클릭과 타자를
+// **엿듣기만** 해서 밥을 떨어뜨린다. 누르던 버튼은 그대로 눌리고 치던 글자는 그대로
+// 찍힌다. 패널을 열 때만 잠깐 마우스와 키보드를 받는다.
+//
+// 전역 모니터는 키를 **삼키지 않는다** — 삼켜야 하는 것(핫키)과 삼키면 안 되는 것
+// (엿듣기)은 애초에 다른 API 다. 다만 손쉬운 사용 권한이 필요하다.
 
 import AppKit
+import ApplicationServices
 import Carbon.HIToolbox
 import WebKit
 
 // MARK: - 상수
 
 private enum Key {
-    /// ⌥⇧S — 게임모드. ⌥⇧ 는 macOS 심볼릭 핫키와 겹치지 않는 몇 안 되는 조합이다
+    /// ⌥⇧S — 밥 주기 끄기/켜기. ⌥⇧ 는 macOS 심볼릭 핫키와 겹치지 않는 몇 안 되는 조합이다
     /// (⌃⌥Space 는 입력 소스 전환 id 61, ⌃Space 는 id 60 이 이미 쓴다).
     static let gameMode = (code: UInt32(kVK_ANSI_S), modifiers: UInt32(optionKey | shiftKey))
     /// ⌥⇧H — 숨기기/보이기.
@@ -98,8 +106,14 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
     private var statusItem: NSStatusItem!
     private var hotKeys: [EventHotKeyRef?] = []
 
-    /// 지금 클릭을 받고 있는가. 이 하나가 4구의 「수식키를 누르고 있나」를 대신한다.
-    private var gameMode = false
+    /// 밥이 떨어지는 중인가. **기본이 켜짐이다** — 남이 화면을 볼 때만 끈다.
+    /// 창이 클릭을 삼키지 않으므로 켜 둔 채로 일할 수 있다. 저장하지 않는다:
+    /// 앱을 띄우면 늘 켜진 채로 시작한다.
+    private var gameMode = true
+
+    /// 전역으로 클릭·타자를 엿듣는 모니터. 권한이 없으면 nil 인 채로 남는다.
+    private var clickMonitor: Any?
+    private var keyMonitor: Any?
     /// 랭킹 패널이 열려 있는가. 열려 있는 동안만 창이 키보드를 받는다.
     private var panelOpen = false
     /// 지금 클릭이 창을 통과하고 있는가. 매 프레임 창을 건드리지 않으려고 들고 있는다.
@@ -134,6 +148,7 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
         buildWindow()
         buildStatusItem()
         registerHotKeys()
+        startEavesdropping()
 
         NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
@@ -209,6 +224,8 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
           }),
           onGameMode: (handler) => { window.__sharkGameMode = handler },
           onPanel: (handler) => { window.__sharkPanel = handler },
+          onFeed: (handler) => { window.__sharkFeed = handler },
+          onType: (handler) => { window.__sharkType = handler },
         }
         // 웹뷰는 콘솔이 안 보인다. 오류만이라도 셸의 stderr 로 흘려보낸다.
         window.addEventListener('error', (e) => window.webkit.messageHandlers.shark.postMessage({
@@ -228,17 +245,18 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
         refreshMenu()
     }
 
-    /// **게임모드가 켜진 것을 눈으로 알 수 있어야 한다.** 켜진 동안은 밑의 앱을 못 누르는데
-    /// 그걸 모르면 「맥이 고장났다」가 된다. 화면 테두리(게임이 그린다)와 여기, 두 곳에서 알린다.
+    /// 밥이 떨어지는 중인지 한눈에. 켜져 있어도 일을 막지 않으므로 경고가 아니라 표시다.
+    /// 꺼 두면 지느러미가 잠든 것처럼 흐려진다.
     private func refreshStatusIcon() {
         if let path = Bundle.main.path(forResource: "tray", ofType: "png"),
-           let image = NSImage(contentsOfFile: path), !gameMode {
+           let image = NSImage(contentsOfFile: path) {
             image.isTemplate = true
             statusItem.button?.image = image
             statusItem.button?.title = ""
+            statusItem.button?.alphaValue = gameMode ? 1.0 : 0.4
         } else {
             statusItem.button?.image = nil
-            statusItem.button?.title = gameMode ? "🐟" : "🦈"
+            statusItem.button?.title = gameMode ? "🦈" : "💤"
         }
     }
 
@@ -250,13 +268,21 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
         menu.addItem(status)
         menu.addItem(.separator())
 
-        let mode = NSMenuItem(title: gameMode ? "게임모드 끄기" : "게임모드 켜기 (밥 주기)",
+        let mode = NSMenuItem(title: gameMode ? "밥 주기 멈추기  ⌥⇧S" : "밥 주기 다시  ⌥⇧S",
                               action: #selector(toggleGameMode), keyEquivalent: "")
         mode.target = self
         mode.state = gameMode ? .on : .off
         menu.addItem(mode)
 
-        let panel = NSMenuItem(title: "랭킹 · 계정", action: #selector(togglePanel), keyEquivalent: "")
+        // 권한이 없으면 클릭은 밥이 되는데 타자만 조용히 안 된다. 그 조용함을 여기서 깬다.
+        if !trusted {
+            let permission = NSMenuItem(title: "⚠︎ 타자가 밥이 되려면 권한이 필요합니다…",
+                                        action: #selector(askForAccessibility), keyEquivalent: "")
+            permission.target = self
+            menu.addItem(permission)
+        }
+
+        let panel = NSMenuItem(title: "랭킹 · 계정  ⌥⇧R", action: #selector(togglePanel), keyEquivalent: "")
         panel.target = self
         menu.addItem(panel)
 
@@ -268,7 +294,7 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
         menu.addItem(reset)
         menu.addItem(.separator())
 
-        let toggle = NSMenuItem(title: "숨기기 / 보이기", action: #selector(toggleWindow), keyEquivalent: "")
+        let toggle = NSMenuItem(title: "숨기기 / 보이기  ⌥⇧H", action: #selector(toggleWindow), keyEquivalent: "")
         toggle.target = self
         menu.addItem(toggle)
 
@@ -333,6 +359,88 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
         window.setFrame(chosenScreen().visibleFrame, display: true)
     }
 
+    // MARK: 엿듣기 — 클릭과 타자를 밥으로
+
+    /// 손쉬운 사용 권한이 있는가. 전역 키 모니터는 이것 없이는 **조용히 아무것도 안 준다** —
+    /// 에러도 안 나고 콜백만 영영 안 불린다. 그래서 물어보고 상태를 들고 있는다.
+    private var trusted: Bool { AXIsProcessTrusted() }
+
+    /// 권한을 물어본 적이 있는가. 띄울 때마다 창을 띄우면 성가시다.
+    private let askedKey = "askedForAccessibility"
+
+    /**
+     클릭과 타자를 전역으로 엿듣는다.
+
+     **삼키지 않는다.** `addGlobalMonitorForEvents` 는 남의 앱으로 가는 이벤트를
+     구경만 시켜 준다 — 누르던 버튼은 그대로 눌리고 치던 글자는 그대로 찍힌다.
+     키를 삼키는 것(전역 핫키)과는 아예 다른 API 다.
+
+     마우스는 권한 없이도 오는 경우가 있지만 키는 반드시 손쉬운 사용 권한이 있어야 한다.
+     */
+    private func startEavesdropping() {
+        clickMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        ) { [weak self] event in
+            self?.heardClick(at: event.locationInWindow)
+        }
+
+        keyMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { [weak self] _ in
+            self?.heardTyping()
+        }
+
+        debugLog("엿듣기 시작 trusted=\(trusted)")
+        if !trusted && !UserDefaults.standard.bool(forKey: askedKey) {
+            UserDefaults.standard.set(true, forKey: askedKey)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                self?.askForAccessibility()
+            }
+        }
+        refreshMenu()
+    }
+
+    /// 전역 마우스 이벤트의 좌표는 **화면 좌표**이고 원점이 왼쪽 아래다.
+    /// 웹뷰는 창 안의 왼쪽 위 기준이라 두 번 옮겨야 한다.
+    private func heardClick(at screenPoint: NSPoint) {
+        guard gameMode, window.isVisible, !panelOpen else { return }
+
+        let frame = window.frame
+        guard NSPointInRect(screenPoint, frame) else { return }
+
+        let x = screenPoint.x - frame.minX
+        let y = frame.maxY - screenPoint.y   // 위아래를 뒤집는다
+
+        webView.evaluateJavaScript("window.__sharkFeed && window.__sharkFeed(\(x), \(y))")
+    }
+
+    private func heardTyping() {
+        guard gameMode, window.isVisible, !panelOpen else { return }
+        // 어디를 쳤는지는 알 수 없고 알 것도 없다 — 자리는 게임이 정한다.
+        webView.evaluateJavaScript("window.__sharkType && window.__sharkType()")
+    }
+
+    /// 권한 없이는 타자가 밥이 안 된다. 한 번만 물어보고, 뒤로는 메뉴에서 열 수 있다.
+    @objc private func askForAccessibility() {
+        let alert = NSAlert()
+        alert.messageText = "타자를 밥으로 바꾸려면 권한이 필요합니다"
+        alert.informativeText = """
+        「손쉬운 사용」에 이 앱을 넣어 주세요. 키를 **엿듣기만** 하고 가로채지 않습니다 —
+        치던 글자는 그대로 찍히고, 어떤 키를 눌렀는지는 게임에 전달되지 않습니다
+        (몇 번 쳤는지만 셉니다).
+
+        허용한 뒤에는 앱을 한 번 껐다 켜야 합니다.
+        """
+        alert.addButton(withTitle: "설정 열기")
+        alert.addButton(withTitle: "나중에")
+        alert.alertStyle = .informational
+
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        let url = URL(string:
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
+        NSWorkspace.shared.open(url)
+    }
+
     // MARK: 입력
 
     private func registerHotKeys() {
@@ -374,7 +482,6 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
     private func setGameMode(_ on: Bool) {
         gameMode = on
         if !on { setPanel(false) }
-        updateMousePass()
         webView.evaluateJavaScript("window.__sharkGameMode && window.__sharkGameMode(\(on))")
         refreshStatusIcon()
         refreshMenu()
@@ -382,8 +489,6 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
 
     @objc private func togglePanel() {
         guard window.isVisible else { return }
-        // 패널은 게임모드에서만 뜻이 있다 — 클릭을 못 받으면 버튼도 못 누른다.
-        if !gameMode { setGameMode(true) }
         setPanel(!panelOpen)
     }
 
@@ -392,8 +497,9 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
         panelOpen = open
         webView.evaluateJavaScript("window.__sharkPanel && window.__sharkPanel(\(open))")
 
-        // 별명을 타이핑하려면 창이 키보드를 받아야 한다. **패널을 열 때만** 포커스를 가져가고,
-        // 닫으면 곧장 쓰던 앱으로 돌려준다.
+        // 패널은 눌러야 하고 별명은 쳐야 한다. **패널을 열 때만** 마우스와 포커스를
+        // 가져가고, 닫으면 곧장 쓰던 앱으로 돌려준다. 그 밖에는 클릭이 늘 통과한다.
+        updateMousePass()
         if open {
             NSApp.activate(ignoringOtherApps: true)
             window.makeKeyAndOrderFront(nil)
@@ -402,10 +508,12 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
         }
     }
 
-    /// **게임모드가 켜진 동안에만** 창이 마우스를 받는다. 4구는 수식키를 누르고 있는
-    /// 동안이었고 상어는 핫키로 켠 동안이다 — 이 한 줄이 두 앱의 유일한 차이다.
+    /// **창이 마우스를 받는 것은 패널이 열렸을 때뿐이다.**
+    ///
+    /// 밥 주기가 켜져 있어도 클릭은 전부 밑의 앱으로 간다 — 늘 켜 두고 일해야 하므로
+    /// 창이 클릭을 삼키면 안 된다. 밥은 전역 모니터가 엿들어서 떨어뜨린다.
     private func updateMousePass() {
-        let wantPass = !gameMode
+        let wantPass = !panelOpen
         guard wantPass != passingThrough else { return }
         passingThrough = wantPass
         window.ignoresMouseEvents = wantPass
@@ -414,12 +522,13 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
 
     @objc private func toggleWindow() {
         if window.isVisible {
-            // **안 보이는 창이 클릭을 먹는 상태를 만들지 않는다.** 숨기면 게임모드도 내린다.
-            setGameMode(false)
+            // **안 보이는 창이 클릭을 먹는 상태를 만들지 않는다.** 패널부터 닫는다.
+            setPanel(false)
             window.orderOut(nil)
         } else {
             window.orderFrontRegardless()
         }
+        refreshStatusIcon()
         refreshMenu()
     }
 

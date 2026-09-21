@@ -31,7 +31,6 @@ function mouthLineY(x) {
 export function draw(ctx, view, snap, extras = {}) {
   ctx.clearRect(0, 0, view.width, view.height)
 
-  if (snap.gameMode) drawGameModeEdge(ctx, view)
   drawRipples(ctx, view, extras.ripples ?? [])
   drawFood(ctx, view, snap.food)
 
@@ -304,7 +303,9 @@ function drawFood(ctx, view, food) {
     const wobble = Math.sin(f.age * 3 + f.id) * 0.004
     const x = (f.x + wobble) * view.scale
     const y = f.y * view.scale
-    const r = 0.007 * view.scale
+    // 클릭으로 준 큰 밥과 타자로 떨어진 작은 밥. 눈으로 구별돼야 한다 —
+    // 상어가 큰 것부터 노리는 이유가 화면에 보여야 한다.
+    const r = (f.radius ?? 0.007) * view.scale
 
     ctx.beginPath()
     ctx.arc(x, y, r * 2.6, 0, Math.PI * 2)
@@ -315,28 +316,13 @@ function drawFood(ctx, view, food) {
     ctx.arc(x, y, r, 0, Math.PI * 2)
     ctx.fillStyle = `rgba(255, 228, 150, ${alpha * 0.9})`
     ctx.fill()
-  }
-}
 
-// MARK: 게임모드 표시
-
-/**
- * **게임모드가 켜진 것을 눈으로 알 수 있어야 한다.** 켜진 동안은 밑의 앱을 못 누르는데,
- * 그걸 모르면 「맥이 고장났다」가 된다. 화면 가장자리에 옅은 물빛이 돈다.
- */
-function drawGameModeEdge(ctx, view) {
-  const thickness = Math.min(view.width, view.height) * 0.05
-
-  for (const [x0, y0, x1, y1] of [
-    [0, 0, 0, thickness],                                   // 위
-    [0, view.height, 0, view.height - thickness],           // 아래
-    [0, 0, thickness, 0],                                   // 왼쪽
-    [view.width, 0, view.width - thickness, 0],             // 오른쪽
-  ]) {
-    const gradient = ctx.createLinearGradient(x0, y0, x1, y1)
-    gradient.addColorStop(0, 'rgba(90, 190, 230, 0.30)')
-    gradient.addColorStop(1, 'rgba(90, 190, 230, 0)')
-    ctx.fillStyle = gradient
-    ctx.fillRect(0, 0, view.width, view.height)
+    // 큰 밥에만 심지 하나 — 작게 줄어도 두 종류가 구별된다.
+    if (f.kind === 'big') {
+      ctx.beginPath()
+      ctx.arc(x - r * 0.3, y - r * 0.3, r * 0.34, 0, Math.PI * 2)
+      ctx.fillStyle = `rgba(255, 252, 235, ${alpha * 0.85})`
+      ctx.fill()
+    }
   }
 }

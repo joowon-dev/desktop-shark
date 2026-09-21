@@ -5,7 +5,7 @@
 
 import { DT } from '../game/constants.js'
 import {
-  createEngine, feedAt, setBounds, setGameMode, snapshot, step,
+  createEngine, feedAt, feedTyped, setBounds, setGameMode, snapshot, step,
 } from '../game/engine.js'
 import { hungerLabel } from '../game/hunger.js'
 import { toNextStage } from '../game/growth.js'
@@ -95,7 +95,7 @@ function afterStep() {
     const mouthY = engine.swimmer.y
     ripples.push({ x: mouthX, y: mouthY, age: 0, duration: 1.1, maxRadius: 0.12 })
     saveState()
-    refreshHud()
+    flashHud()
   }
 }
 
@@ -125,24 +125,58 @@ function saveState() {
 }
 
 // MARK: 밥 주기
+//
+// **클릭도 타자도 이 창으로 오지 않는다.** 창은 마우스를 언제나 밑의 앱으로 흘려보내고
+// (그래야 일을 계속할 수 있다), 셸이 화면 어디서 눌렸는지 **엿듣기만** 해서 알려 준다.
+// 누르던 버튼은 그대로 눌리고 치던 글자는 그대로 찍힌다 — 밥은 덤으로 떨어진다.
 
-/**
- * 게임모드에서만 클릭이 여기까지 온다 — 그 밖에는 셸이 창째로 클릭을 통과시켜서
- * 이 핸들러가 아예 안 불린다. 그래도 한 번 더 확인한다: 패널을 연 채로 누른 클릭이
- * 밥이 되면 안 된다.
- */
-canvas.addEventListener('pointerdown', (event) => {
-  if (!engine.gameMode) return
-  engine = feedAt(engine, event.clientX / view.scale, event.clientY / view.scale)
+/** 셸이 전역으로 들은 클릭. 화면 좌표(CSS 픽셀)로 온다. */
+bridge?.onFeed?.((x, y) => {
+  engine = feedAt(engine, x / view.scale, y / view.scale, 'big')
+  flashHud()
 })
+
+/** 셸이 전역으로 들은 타자. 자리는 게임이 정한다 — 어디를 쳤는지는 알 수 없고 알 것도 없다. */
+bridge?.onType?.(() => {
+  const before = engine.food.length
+  engine = feedTyped(engine)
+  if (engine.food.length !== before) flashHud()
+})
+
+// 셸이 없을 때(브라우저로 열었을 때)만 페이지에서 직접 받는다. 실제 앱에서는
+// 창이 클릭을 안 받으므로 이 길로 오지 않는다.
+if (!bridge) {
+  canvas.addEventListener('pointerdown', (event) => {
+    engine = feedAt(engine, event.clientX / view.scale, event.clientY / view.scale, 'big')
+  })
+  window.addEventListener('keydown', () => { engine = feedTyped(engine) })
+}
 
 // MARK: 셸이 부르는 것
 
+/**
+ * 눈금은 **밥을 줬을 때만 잠깐** 뜬다.
+ *
+ * 밥 주기가 늘 켜져 있으므로 눈금을 계속 띄워 두면 화면 위쪽에 영영 붙어 있는 띠가
+ * 된다. 방금 무슨 일이 일어났는지만 알려 주고 사라지는 편이 낫다.
+ */
+let hudTimer = null
+
+function flashHud() {
+  refreshHud()
+  hud.hidden = false
+  hud.classList.remove('fading')
+  clearTimeout(hudTimer)
+  hudTimer = setTimeout(() => {
+    hud.classList.add('fading')
+    hudTimer = setTimeout(() => { hud.hidden = true }, 600)
+  }, 2600)
+}
+
 function applyGameMode(on) {
   engine = setGameMode(engine, on)
-  hud.hidden = !on
   if (!on) panel.hidden = true
-  refreshHud()
+  flashHud()
 }
 
 bridge?.onGameMode?.((on) => applyGameMode(on))
@@ -316,7 +350,7 @@ async function start() {
   }
 
   showAccount()
-  refreshHud()
+  flashHud()
   requestAnimationFrame(frame)
 }
 

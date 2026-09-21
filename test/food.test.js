@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { EAT_RADIUS, FOOD_LIFETIME, FOOD_SINK_SPEED, MAX_FOOD } from '../src/game/constants.js'
 import {
-  canEat, createFood, dropFood, foodAlpha, nearestFood, removeFood, stepFood,
+  EAT_RADIUS, FOOD_KINDS, FOOD_LIFETIME, FOOD_SINK_SPEED, MAX_FOOD,
+} from '../src/game/constants.js'
+import {
+  bestFood, canEat, createFood, dropFood, foodAlpha, nearestFood, removeFood, stepFood,
 } from '../src/game/food.js'
 
 describe('dropFood', () => {
@@ -45,6 +47,41 @@ describe('stepFood', () => {
   it('화면 아래로 충분히 내려가면 수명 전에도 사라진다', () => {
     const list = stepFood([{ id: 1, x: 0.5, y: 1.19, age: 0 }], 1)
     expect(list).toHaveLength(0)
+  })
+})
+
+describe('createFood', () => {
+  it('종류에 따라 값과 크기가 달라진다', () => {
+    expect(createFood(1, 0, 0, 'big').value).toBe(FOOD_KINDS.big.value)
+    expect(createFood(1, 0, 0, 'small').value).toBe(FOOD_KINDS.small.value)
+    expect(createFood(1, 0, 0, 'big').radius).toBeGreaterThan(createFood(1, 0, 0, 'small').radius)
+  })
+
+  it('기본은 큰 밥이다', () => {
+    expect(createFood(1, 0, 0).kind).toBe('big')
+  })
+
+  it('가라앉아도 종류와 값이 남는다', () => {
+    const [f] = stepFood([createFood(1, 0.5, 0.5, 'small')], 1)
+    expect(f.kind).toBe('small')
+    expect(f.value).toBe(FOOD_KINDS.small.value)
+  })
+})
+
+describe('bestFood', () => {
+  it('거의 같은 거리면 큰 밥을 고른다', () => {
+    // 거리만 보면 타자로 흩뿌려진 작은 밥에 밀려 큰 밥을 영영 안 먹는다.
+    const list = [createFood(1, 0.30, 0.5, 'small'), createFood(2, 0.32, 0.5, 'big')]
+    expect(bestFood(list, { x: 0, y: 0.5 }).id).toBe(2)
+  })
+
+  it('그래도 아주 멀면 큰 밥을 포기한다', () => {
+    const list = [createFood(1, 0.10, 0.5, 'small'), createFood(2, 1.50, 0.5, 'big')]
+    expect(bestFood(list, { x: 0, y: 0.5 }).id).toBe(1)
+  })
+
+  it('없으면 null', () => {
+    expect(bestFood([], { x: 0, y: 0 })).toBe(null)
   })
 })
 

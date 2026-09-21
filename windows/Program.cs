@@ -9,8 +9,10 @@
 //   1. **투명은 DWM 픽셀 알파로 만든다** — 컬러 키가 아니다. 상어는 화면의 거의 모든
 //      픽셀이 반투명이라(흐릿한 실루엣, 사그라드는 물살) 컬러 키를 쓰면 자홍색 테두리가
 //      낀다. 불꽃놀이가 같은 이유로 같은 선택을 했다.
-//   2. **클릭을 받아야 한다** — 4구·불꽃놀이는 마우스를 영영 안 받지만 상어는 밥을
-//      클릭으로 준다. 게임모드가 켜진 동안만 WS_EX_TRANSPARENT 를 걷어낸다.
+//   2. **창은 마우스를 안 받는다. 대신 엿듣는다.** 밥 주기는 늘 켜져 있으므로 창이
+//      클릭을 삼키면 일을 아예 못 한다. WS_EX_TRANSPARENT 를 붙여 둔 채로, 저수준 훅
+//      (WH_MOUSE_LL / WH_KEYBOARD_LL)으로 클릭과 타자를 **구경만** 한다 — 누르던
+//      버튼은 그대로 눌리고 치던 글자는 그대로 찍힌다. 패널을 열 때만 잠깐 받는다.
 
 using System.Runtime.InteropServices;
 using System.Text.Json;
@@ -48,11 +50,9 @@ sealed class OverlayContext : ApplicationContext
 
     private void Refresh()
     {
-        // 트레이 글자에도 게임모드를 적는다. 켜진 동안은 밑의 앱을 못 누르는데,
-        // 그걸 모르면 「컴퓨터가 고장났다」가 된다.
         tray.Text = overlay.GameMode
-            ? $"바탕화면 상어 — 게임모드 (밥 주는 중) · {overlay.StatusText}"
-            : $"바탕화면 상어 — {overlay.StatusText}";
+            ? $"바탕화면 상어 — 밥 주는 중 · {overlay.StatusText}"
+            : $"바탕화면 상어 — 밥 주기 멈춤 · {overlay.StatusText}";
         tray.ContextMenuStrip = BuildMenu();
     }
 
@@ -70,7 +70,7 @@ sealed class OverlayContext : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
 
         menu.Items.Add(new ToolStripMenuItem(
-            overlay.GameMode ? "게임모드 끄기  Alt+Shift+S" : "게임모드 켜기 (밥 주기)  Alt+Shift+S",
+            overlay.GameMode ? "밥 주기 멈추기  Alt+Shift+S" : "밥 주기 다시  Alt+Shift+S",
             null, (_, _) => overlay.ToggleGameMode())
         {
             Checked = overlay.GameMode,
@@ -132,6 +132,14 @@ sealed class Overlay : Form
     private const int VK_H = 0x48;
     private const int VK_R = 0x52;
 
+    private const int WH_KEYBOARD_LL = 13;
+    private const int WH_MOUSE_LL = 14;
+    private const int WM_KEYDOWN = 0x0100;
+    private const int WM_SYSKEYDOWN = 0x0104;
+    private const int WM_LBUTTONDOWN = 0x0201;
+    private const int WM_RBUTTONDOWN = 0x0204;
+    private const int WM_MBUTTONDOWN = 0x0207;
+
     private const int HOTKEY_GAMEMODE = 1;
     private const int HOTKEY_TOGGLE = 2;
     private const int HOTKEY_PANEL = 3;
@@ -163,6 +171,25 @@ sealed class Overlay : Form
     [DllImport("user32.dll")] private static extern bool RegisterHotKey(IntPtr hWnd, int id, int mod, int vk);
     [DllImport("user32.dll")] private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
     [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    private delegate IntPtr HookProc(int code, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr SetWindowsHookEx(int id, HookProc fn, IntPtr module, uint thread);
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool UnhookWindowsHookEx(IntPtr hook);
+    [DllImport("user32.dll")]
+    private static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr wParam, IntPtr lParam);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MSLLHOOKSTRUCT
+    {
+        public int x;
+        public int y;
+        public uint mouseData;
+        public uint flags;
+        public uint time;
+        public IntPtr dwExtraInfo;
+    }
     [DllImport("gdi32.dll")] private static extern IntPtr CreateRectRgn(int l, int t, int r, int b);
     [DllImport("gdi32.dll")] private static extern bool DeleteObject(IntPtr hObject);
     [DllImport("dwmapi.dll")] private static extern int DwmEnableBlurBehindWindow(IntPtr hWnd, ref DWM_BLURBEHIND bb);
@@ -187,8 +214,18 @@ sealed class Overlay : Form
     private bool passingThrough = true;
     private bool panelOpen;
 
-    /// <summary>지금 클릭을 받고 있는가. 맥 셸의 gameMode 와 같다.</summary>
-    public bool GameMode { get; private set; }
+    // 훅 핸들과 델리게이트. **델리게이트를 필드로 들고 있어야 한다** — 지역 변수로 두면
+    // GC 가 거둬 가고, 그때부터 훅이 조용히 죽는다(에러도 없이 콜백만 안 온다).
+    private IntPtr mouseHook = IntPtr.Zero;
+    private IntPtr keyHook = IntPtr.Zero;
+    private HookProc? mouseProc;
+    private HookProc? keyProc;
+
+    /// <summary>
+    /// 밥이 떨어지는 중인가. <b>기본이 켜짐이다</b> — 남이 화면을 볼 때만 끈다.
+    /// 창이 클릭을 삼키지 않으므로 켜 둔 채로 일할 수 있다. 저장하지 않는다.
+    /// </summary>
+    public bool GameMode { get; private set; } = true;
 
     /// <summary>트레이에 적을 것. 렌더러가 밀어 준다.</summary>
     public string StatusText { get; private set; } = "1단계 · 배부름";
@@ -275,7 +312,67 @@ sealed class Overlay : Form
         var toggleOk = RegisterHotKey(Handle, HOTKEY_TOGGLE, MOD_ALT | MOD_SHIFT | MOD_NOREPEAT, VK_H);
         var panelOk = RegisterHotKey(Handle, HOTKEY_PANEL, MOD_ALT | MOD_SHIFT | MOD_NOREPEAT, VK_R);
         DebugLog($"핫키 등록 game={gameOk} toggle={toggleOk} panel={panelOk}");
+
+        StartEavesdropping();
     }
+
+    // MARK: 엿듣기 — 클릭과 타자를 밥으로
+    //
+    // 저수준 훅은 이벤트를 **구경만** 한다. CallNextHookEx 로 그대로 흘려보내므로
+    // 누르던 버튼은 그대로 눌리고 치던 글자는 그대로 찍힌다. 맥의 전역 모니터와 같은
+    // 자리이고, 맥과 달리 따로 권한을 받을 필요가 없다.
+
+    private void StartEavesdropping()
+    {
+        // 델리게이트를 필드에 담아 둔다. 지역 변수로 두면 GC 가 거둬 가고
+        // 그때부터 훅이 **조용히** 죽는다 — 에러도 없이 콜백만 안 온다.
+        mouseProc = MouseHook;
+        keyProc = KeyHook;
+
+        mouseHook = SetWindowsHookEx(WH_MOUSE_LL, mouseProc, IntPtr.Zero, 0);
+        keyHook = SetWindowsHookEx(WH_KEYBOARD_LL, keyProc, IntPtr.Zero, 0);
+        DebugLog($"엿듣기 시작 mouse={mouseHook != IntPtr.Zero} key={keyHook != IntPtr.Zero}");
+    }
+
+    private IntPtr MouseHook(int code, IntPtr wParam, IntPtr lParam)
+    {
+        if (code >= 0 && Feeding)
+        {
+            var message = (int)wParam;
+            if (message == WM_LBUTTONDOWN || message == WM_RBUTTONDOWN || message == WM_MBUTTONDOWN)
+            {
+                var data = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);
+                // 훅은 화면 좌표를 준다. 웹뷰는 창 안 왼쪽 위 기준이다.
+                var bounds = Bounds;
+                if (data.x >= bounds.Left && data.x < bounds.Right
+                    && data.y >= bounds.Top && data.y < bounds.Bottom)
+                {
+                    var x = data.x - bounds.Left;
+                    var y = data.y - bounds.Top;
+                    // 훅 안에서는 오래 붙잡으면 안 된다 — 윈도우가 훅을 떼어 버린다.
+                    BeginInvoke(() => Send($"window.__sharkFeed && window.__sharkFeed({x}, {y})"));
+                }
+            }
+        }
+        return CallNextHookEx(mouseHook, code, wParam, lParam);
+    }
+
+    private IntPtr KeyHook(int code, IntPtr wParam, IntPtr lParam)
+    {
+        if (code >= 0 && Feeding)
+        {
+            var message = (int)wParam;
+            if (message == WM_KEYDOWN || message == WM_SYSKEYDOWN)
+            {
+                // 어디를 쳤는지도 무엇을 쳤는지도 게임에 넘기지 않는다 — 몇 번인지만 센다.
+                BeginInvoke(() => Send("window.__sharkType && window.__sharkType()"));
+            }
+        }
+        return CallNextHookEx(keyHook, code, wParam, lParam);
+    }
+
+    /// <summary>지금 밥이 떨어지는가. 패널이 열려 있으면 그쪽 조작이 우선이다.</summary>
+    private bool Feeding => GameMode && ready && Visible && !panelOpen;
 
     /// <summary>빈 영역으로 블러를 켠다 — 흐림은 없고 픽셀 단위 알파만 얻는다.</summary>
     private void EnablePerPixelAlpha()
@@ -303,6 +400,8 @@ sealed class Overlay : Form
         UnregisterHotKey(Handle, HOTKEY_GAMEMODE);
         UnregisterHotKey(Handle, HOTKEY_TOGGLE);
         UnregisterHotKey(Handle, HOTKEY_PANEL);
+        if (mouseHook != IntPtr.Zero) UnhookWindowsHookEx(mouseHook);
+        if (keyHook != IntPtr.Zero) UnhookWindowsHookEx(keyHook);
         // SystemEvents 는 프로세스 전역 정적 이벤트다 — 안 풀면 이 창이 죽은 뒤에도
         // 구독이 남는다.
         SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
@@ -381,6 +480,8 @@ sealed class Overlay : Form
           }),
           onGameMode: (handler) => { window.__sharkGameMode = handler },
           onPanel: (handler) => { window.__sharkPanel = handler },
+          onFeed: (handler) => { window.__sharkFeed = handler },
+          onType: (handler) => { window.__sharkType = handler },
         }
         window.addEventListener('error', (e) => window.chrome.webview.postMessage({
           type: 'log', text: `${e.message} (${e.filename}:${e.lineno})`,
@@ -407,18 +508,19 @@ sealed class Overlay : Form
     {
         GameMode = on;
         if (!on) SetPanel(false);
-        UpdateMousePass();
         Send($"window.__sharkGameMode && window.__sharkGameMode({(on ? "true" : "false")})");
         SettingsChanged?.Invoke();
     }
 
     /// <summary>
-    /// <b>게임모드가 켜진 동안에만</b> 창이 마우스를 받는다. 4구는 수식키를 누르고 있는
-    /// 동안이었고 상어는 핫키로 켠 동안이다 — 이 한 줄이 두 셸의 유일한 차이다.
+    /// <b>창이 마우스를 받는 것은 패널이 열렸을 때뿐이다.</b>
+    ///
+    /// 밥 주기가 켜져 있어도 클릭은 전부 밑의 앱으로 간다 — 늘 켜 두고 일해야 하므로
+    /// 창이 클릭을 삼키면 안 된다. 밥은 저수준 훅이 엿들어서 떨어뜨린다.
     /// </summary>
     private void UpdateMousePass()
     {
-        var wantPass = !GameMode;
+        var wantPass = !panelOpen;
         if (wantPass == passingThrough) return;
         passingThrough = wantPass;
         DebugLog($"pass {wantPass}");
@@ -431,8 +533,6 @@ sealed class Overlay : Form
     public void TogglePanel()
     {
         if (!Visible) return;
-        // 패널은 게임모드에서만 뜻이 있다 — 클릭을 못 받으면 버튼도 못 누른다.
-        if (!GameMode) SetGameMode(true);
         SetPanel(!panelOpen);
     }
 
@@ -441,6 +541,7 @@ sealed class Overlay : Form
         if (open == panelOpen) return;
         panelOpen = open;
         Send($"window.__sharkPanel && window.__sharkPanel({(open ? "true" : "false")})");
+        UpdateMousePass();
 
         // 별명을 타이핑하려면 창이 키보드를 받아야 한다. WS_EX_NOACTIVATE 가 붙어 있는
         // 동안은 한 글자도 못 친다. <b>패널을 열 때만</b> 떼고, 닫으면 곧장 도로 붙인다.
@@ -454,8 +555,8 @@ sealed class Overlay : Form
     {
         if (Visible)
         {
-            // **안 보이는 창이 클릭을 먹는 상태를 만들지 않는다.** 숨기면 게임모드도 내린다.
-            SetGameMode(false);
+            // **안 보이는 창이 클릭을 먹는 상태를 만들지 않는다.** 패널부터 닫는다.
+            SetPanel(false);
             Hide();
         }
         else Show();

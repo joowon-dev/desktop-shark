@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { createEngine, feedAt, mouthOf, setGameMode, snapshot, step } from '../src/game/engine.js'
-import { DT, MAX_FOOD } from '../src/game/constants.js'
+import {
+  createEngine, feedAt, feedTyped, mouthOf, setGameMode, snapshot, step,
+} from '../src/game/engine.js'
+import { DT, FOOD_KINDS, MAX_FOOD, TYPE_FEED_INTERVAL } from '../src/game/constants.js'
 
 const bounds = { w: 16 / 9, h: 1 }
 
@@ -24,7 +26,7 @@ describe('밥을 주면 달려와서 먹는다', () => {
 
     const eaten = runUntilEaten(e)
     expect(eaten).not.toBe(null)
-    expect(eaten.eaten).toBe(1)
+    expect(eaten.eaten).toBe(FOOD_KINDS.big.value)
     expect(eaten.food).toHaveLength(0)
   })
 
@@ -47,12 +49,92 @@ describe('밥을 주면 달려와서 먹는다', () => {
     expect(snapshot(eaten).hunger).toBe(0)
   })
 
-  it('먹을 때마다 서버에 올릴 줄이 하나씩 는다', () => {
+  it('먹은 만큼 서버에 올릴 줄이 는다', () => {
     let e = createEngine({ eaten: 0, lastFedAt: 0, seed: 5, bounds, now: 0 })
     expect(e.pending).toBe(0)
     e = feedAt(e, bounds.w / 2, 0.5)
     const eaten = runUntilEaten(e)
-    expect(eaten.pending).toBe(1)
+    expect(eaten.pending).toBe(FOOD_KINDS.big.value)
+  })
+})
+
+describe('밥 두 종류', () => {
+  it('큰 밥이 작은 밥보다 값지다 — 클릭은 일부러, 타자는 무심코', () => {
+    // 값이 같으면 타이핑만으로 몇 분 만에 다 커서 키우는 일이 사라진다.
+    expect(FOOD_KINDS.big.value).toBeGreaterThan(FOOD_KINDS.small.value)
+    expect(FOOD_KINDS.big.value).toBe(3)
+    expect(FOOD_KINDS.small.value).toBe(1)
+  })
+
+  it('큰 밥을 먹으면 3, 작은 밥을 먹으면 1 오른다', () => {
+    for (const [kind, gain] of [['big', 3], ['small', 1]]) {
+      let e = createEngine({ eaten: 0, lastFedAt: 0, seed: 3, bounds, now: 0 })
+      e = feedAt(e, bounds.w / 2, 0.5, kind)
+      const eaten = runUntilEaten(e)
+      expect(eaten, kind).not.toBe(null)
+      expect(eaten.eaten, kind).toBe(gain)
+    }
+  })
+
+  it('클릭은 큰 밥, 타자는 작은 밥이다', () => {
+    let e = createEngine({ seed: 1, bounds, now: 0 })
+    e = feedAt(e, 0.5, 0.5)
+    expect(e.food[0].kind).toBe('big')
+
+    e = feedTyped(e)
+    expect(e.food[1].kind).toBe('small')
+  })
+})
+
+describe('feedTyped', () => {
+  it('타자 밥은 화면 안 아무 데나 떨어진다', () => {
+    let e = createEngine({ seed: 7, bounds, now: 0 })
+    const spots = []
+    for (let i = 0; i < 20; i += 1) {
+      e = feedTyped({ ...e, lastTypedAt: -Infinity })
+      const last = e.food[e.food.length - 1]
+      if (last) spots.push(last)
+      e = { ...e, food: [] } // 자리만 보려고 비운다
+    }
+    expect(spots.length).toBeGreaterThan(5)
+    for (const f of spots) {
+      expect(f.x).toBeGreaterThan(0)
+      expect(f.x).toBeLessThan(bounds.w)
+      expect(f.y).toBeGreaterThan(0)
+      expect(f.y).toBeLessThan(bounds.h)
+    }
+    // 매번 같은 자리면 「아무 데나」가 아니다.
+    expect(new Set(spots.map((f) => `${f.x.toFixed(3)},${f.y.toFixed(3)}`)).size).toBeGreaterThan(5)
+  })
+
+  it(`${TYPE_FEED_INTERVAL}초에 한 번만 받는다 — 연타로 화면을 채우지 않는다`, () => {
+    let e = createEngine({ seed: 1, bounds, now: 0 })
+    // 같은 순간에 스무 번 친다
+    for (let i = 0; i < 20; i += 1) e = feedTyped(e)
+    expect(e.food).toHaveLength(1)
+
+    // 간격이 지나면 하나 더 받는다
+    e = { ...e, elapsed: TYPE_FEED_INTERVAL + 0.01 }
+    e = feedTyped(e)
+    expect(e.food).toHaveLength(2)
+  })
+
+  it('넘치는 입력은 줄을 세우지 않고 버린다', () => {
+    // 줄을 세우면 손을 뗀 뒤에도 한참 떨어져서 「내가 친 것」이라는 느낌이 끊긴다.
+    let e = createEngine({ seed: 1, bounds, now: 0 })
+    for (let i = 0; i < 50; i += 1) e = feedTyped(e)
+    e = { ...e, elapsed: 100 }
+    e = feedTyped(e)
+    expect(e.food).toHaveLength(2)
+  })
+})
+
+describe('밥 주기를 끄면', () => {
+  it('클릭도 타자도 밥이 안 된다 — 남이 볼 때 쓰는 기능이다', () => {
+    let e = setGameMode(createEngine({ seed: 1, bounds, now: 0 }), false)
+    e = feedAt(e, 0.5, 0.5)
+    e = feedTyped(e)
+    expect(e.food).toHaveLength(0)
   })
 })
 
@@ -81,13 +163,17 @@ describe('mouthOf', () => {
 })
 
 describe('snapshot', () => {
-  it('게임모드를 켜면 더 진해진다', () => {
+  it('밥 주기를 켜면 더 진해진다', () => {
     let e = createEngine({ eaten: 20, lastFedAt: 0, seed: 1, bounds, now: 0 })
     // 숨어 있으면 배율이 0 이라 차이가 안 난다. 순찰로 옮겨 놓고 잰다.
     e = { ...e, brain: { ...e.brain, state: 'cruise' } }
-    const off = snapshot(e).alpha
+    const off = snapshot(setGameMode(e, false)).alpha
     const on = snapshot(setGameMode(e, true)).alpha
     expect(on).toBeGreaterThan(off)
+  })
+
+  it('기본은 켜짐이다 — 앱을 띄우면 늘 상어가 먹고 있다', () => {
+    expect(createEngine({ bounds, now: 0 }).gameMode).toBe(true)
   })
 
   it('먹은 개수가 단계로 이어진다', () => {
