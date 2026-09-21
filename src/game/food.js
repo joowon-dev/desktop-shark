@@ -1,6 +1,8 @@
 // 떨어진 밥들. **상어의 상태를 모른다.** 가라앉고, 늙고, 먹히면 사라진다.
 
-import { EAT_RADIUS, FOOD_KINDS, FOOD_LIFETIME, FOOD_SINK_SPEED, MAX_FOOD } from './constants.js'
+import {
+  EAT_RADIUS, FOOD_FLOOR, FOOD_INSET, FOOD_KINDS, FOOD_LIFETIME, FOOD_SINK_SPEED, MAX_FOOD,
+} from './constants.js'
 
 /**
  * 밥 하나. id 는 그리는 쪽이 흔들림 위상을 고정하는 데 쓴다.
@@ -12,19 +14,36 @@ export function createFood(id, x, y, kind = 'big') {
 }
 
 /**
+ * 밥이 놓일 수 있는 자리로 당긴다. **테두리에 딱 붙지 않는다** — 돌진한 상어가
+ * 지나치면서 화면 밖으로 밀려 나간다. 바닥은 더 넉넉히 띄운다(가라앉으니까).
+ */
+export function clampFood(x, y, bounds) {
+  return {
+    x: Math.max(FOOD_INSET, Math.min(bounds.w - FOOD_INSET, x)),
+    y: Math.max(FOOD_INSET, Math.min(bounds.h - FOOD_FLOOR, y)),
+  }
+}
+
+/**
  * 밥을 하나 떨어뜨린다. 이미 가득이면 **안 떨어뜨린다** —
  * 오래된 것을 밀어내면 상어가 쫓던 밥이 발밑에서 사라진다.
  */
-export function dropFood(list, id, x, y, kind = 'big') {
+export function dropFood(list, id, x, y, kind = 'big', bounds = { w: 1, h: 1 }) {
   if (list.length >= MAX_FOOD) return list
-  return [...list, createFood(id, x, y, kind)]
+  const at = clampFood(x, y, bounds)
+  return [...list, createFood(id, at.x, at.y, kind)]
 }
 
-/** 한 스텝. 가라앉히고 늙히고, 수명이 다한 것을 버린다. */
-export function stepFood(list, dt) {
+/**
+ * 한 스텝. 가라앉히고 늙히고, 수명이 다한 것을 버린다.
+ *
+ * **바닥에서 멈춘다.** 화면 밖으로 내려가게 두면 상어가 따라 내려가서 안 보이는 데서
+ * 먹는다 — 돌진에는 벽 보정을 안 걸므로 밥이 곧 상어가 갈 수 있는 가장 아래다.
+ */
+export function stepFood(list, dt, bounds = { w: 1, h: 1 }) {
   return list
-    .map((f) => ({ ...f, y: f.y + FOOD_SINK_SPEED * dt, age: f.age + dt }))
-    .filter((f) => f.age < FOOD_LIFETIME && f.y < 1.2)
+    .map((f) => ({ ...f, ...clampFood(f.x, f.y + FOOD_SINK_SPEED * dt, bounds), age: f.age + dt }))
+    .filter((f) => f.age < FOOD_LIFETIME)
 }
 
 /**

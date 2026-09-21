@@ -6,6 +6,9 @@
 //
 // 좌표는 정규 좌표(화면 짧은 변 = 1)로 들어와서 `scale` 로 픽셀이 된다.
 
+import {
+  RIPPLE_ALPHA, WAKE_ALPHA, WAKE_LIFE, WAKE_SPREAD, WAKE_WIDTH,
+} from '../game/constants.js'
 import { foodAlpha } from '../game/food.js'
 import { detailOf } from '../game/growth.js'
 import { speciesOf } from '../game/species.js'
@@ -312,7 +315,7 @@ function addSmooth(ctx, raw) {
 function drawWake(ctx, view, snap, all) {
   // 몸통에 깔린 자국은 버린다. 상어가 반투명이라 몸 밑을 지나는 선이 비쳐서
   // 옆구리에 흐린 얼룩이 생긴다 — 꼬리 뒤에서부터만 그린다.
-  const clear = snap.length * 0.55
+  const clear = snap.length * 0.6
   const wake = all.filter((w) => Math.hypot(w.x - snap.swimmer.x, w.y - snap.swimmer.y) > clear)
   if (wake.length < 2) return
 
@@ -322,13 +325,13 @@ function drawWake(ctx, view, snap, all) {
     const a = wake[i - 1]
     const b = wake[i]
     // 오래된 쪽이 흐리고 넓다 — 퍼지면서 사라진다.
-    const life = 1 - b.age / 1.6
+    const life = 1 - b.age / WAKE_LIFE
     if (life <= 0) continue
-    const spread = (1 - life) * 0.03 * view.scale
+    const spread = (1 - life) * WAKE_SPREAD * view.scale
 
     // **아주 연하다.** 물자국이 상어보다 눈에 띄면 화면에 흰 줄이 그어진 것으로 보인다.
-    ctx.strokeStyle = `rgba(255, 255, 255, ${life * snap.alpha * 0.13})`
-    ctx.lineWidth = Math.max(0.6, life * 0.006 * view.scale)
+    ctx.strokeStyle = `rgba(255, 255, 255, ${life * snap.alpha * WAKE_ALPHA})`
+    ctx.lineWidth = Math.max(0.5, life * WAKE_WIDTH * view.scale)
 
     for (const side of [-1, 1]) {
       ctx.beginPath()
@@ -350,8 +353,8 @@ function drawRipples(ctx, view, ripples) {
     const radius = (1 - life) * r.maxRadius * view.scale
     ctx.beginPath()
     ctx.arc(r.x * view.scale, r.y * view.scale, radius, 0, Math.PI * 2)
-    ctx.strokeStyle = `rgba(255, 255, 255, ${life * 0.16})`
-    ctx.lineWidth = Math.max(0.6, life * 0.004 * view.scale)
+    ctx.strokeStyle = `rgba(255, 255, 255, ${life * RIPPLE_ALPHA})`
+    ctx.lineWidth = Math.max(0.5, life * WAKE_WIDTH * view.scale)
     ctx.stroke()
   }
 }

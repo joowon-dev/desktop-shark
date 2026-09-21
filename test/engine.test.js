@@ -229,6 +229,83 @@ describe('상어는 화면 밖으로 안 나간다', () => {
     }
   })
 
+  it('**밥을 쫓는 동안에도 화면 안이다** — 가라앉는 밥을 따라 내려가지 않는다', () => {
+    // 실제로 겪은 것이다: 밥이 화면 밖까지 가라앉는데 돌진에는 벽 보정이 없어서
+    // 상어가 안 보이는 아래까지 따라 내려갔다. 타자를 계속 치는 상황을 흉내 낸다.
+    const screen = { w: 16 / 9, h: 1 }
+    let e = createEngine({ eaten: 0, lastFedAt: 0, seed: 21, bounds: screen, now: 0 })
+    let now = 0
+    let lowest = 0
+
+    for (let i = 0; i < 60 * 600; i += 1) {
+      now += DT * 1000
+      // 0.6 초마다 한 번씩 타자 밥이 떨어진다 — 쉬지 않고 치는 사람.
+      if (i % 36 === 0) e = feedTyped(e)
+      if (i % 600 === 0) e = feedAt(e, screen.w * 0.5, 0.5)
+      e = step(e, now, DT)
+      lowest = Math.max(lowest, e.swimmer.y - screen.h)
+    }
+
+    expect(lowest, `화면 아래로 ${lowest.toFixed(3)} 만큼 내려갔다`).toBeLessThan(0.05)
+  })
+
+  it('밥이 화면 밖으로 가라앉지 않는다', () => {
+    const screen = { w: 16 / 9, h: 1 }
+    let e = createEngine({ eaten: 0, lastFedAt: 0, seed: 8, bounds: screen, now: 0 })
+    let now = 0
+    for (let i = 0; i < 60 * 300; i += 1) {
+      now += DT * 1000
+      if (i % 40 === 0) e = feedTyped(e)
+      e = step(e, now, DT)
+      for (const f of e.food) expect(f.y).toBeLessThanOrEqual(screen.h)
+    }
+  })
+
+  it('**테두리를 클릭해도** 상어가 화면 밖으로 안 밀려난다', () => {
+    // 돌진한 상어는 목표를 지나친다. 테두리에 딱 붙은 밥을 먹으면 그만큼 밖으로
+    // 나가므로, 밥을 조금 안쪽으로 당겨 둬야 한다(FOOD_INSET).
+    const screen = { w: 16 / 9, h: 1 }
+    const edges = [
+      [0, 0], [screen.w, 0], [0, screen.h], [screen.w, screen.h],
+      [screen.w / 2, 0], [screen.w / 2, screen.h], [0, screen.h / 2], [screen.w, screen.h / 2],
+    ]
+
+    for (const [ex, ey] of edges) {
+      let e = createEngine({ eaten: 0, lastFedAt: 0, seed: 17, bounds: screen, now: 0 })
+      let now = 0
+      let worst = 0
+      for (let i = 0; i < 60 * 90; i += 1) {
+        now += DT * 1000
+        // 그 구석만 계속 클릭한다.
+        if (i % 120 === 0) e = feedAt(e, ex, ey)
+        e = step(e, now, DT)
+        worst = Math.max(worst,
+          -e.swimmer.x, e.swimmer.x - screen.w, -e.swimmer.y, e.swimmer.y - screen.h)
+      }
+      expect(worst, `(${ex.toFixed(2)}, ${ey.toFixed(2)}) 에서 ${worst.toFixed(3)} 만큼 나갔다`)
+        .toBeLessThan(0.06)
+    }
+  })
+
+  it('밖에 있는 채로 시작해도 돌아온다 — 화면이 바뀌면 밖에 남을 수 있다', () => {
+    // 모니터를 바꾸거나 해상도가 줄면 상어가 새 화면 밖에 있게 된다. 밥을 쫓는
+    // 중이어도 일단 화면 안으로 돌아와야 한다.
+    const screen = { w: 16 / 9, h: 1 }
+    let e = createEngine({ eaten: 0, lastFedAt: 0, seed: 2, bounds: screen, now: 0 })
+    e = { ...e, swimmer: { x: screen.w + 0.6, y: screen.h + 0.6, heading: 0.4, speed: 0.2 } }
+    e = feedAt(e, screen.w * 0.5, screen.h * 0.5)
+
+    let now = 0
+    let came = false
+    for (let i = 0; i < 60 * 30 && !came; i += 1) {
+      now += DT * 1000
+      e = step(e, now, DT)
+      came = e.swimmer.x < screen.w && e.swimmer.y < screen.h
+        && e.swimmer.x > 0 && e.swimmer.y > 0
+    }
+    expect(came, '30초 안에 화면 안으로 못 돌아왔다').toBe(true)
+  })
+
   it('굶어서 에워싸는 동안에도 화면 안이다', () => {
     const screen = { w: 16 / 9, h: 1 }
     let e = createEngine({ eaten: 0, lastFedAt: null, seed: 5, bounds: screen, now: 0 })

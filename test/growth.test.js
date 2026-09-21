@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { GAME_MODE_ALPHA, MAX_ALPHA, STAGE_THRESHOLDS } from '../src/game/constants.js'
+import {
+  GAME_MODE_ALPHA, MAX_ALPHA, RIPPLE_ALPHA, STAGE_THRESHOLDS,
+  WAKE_ALPHA, WAKE_LIFE, WAKE_SPREAD, WAKE_WIDTH,
+} from '../src/game/constants.js'
 import { baseAlphaOf, detailOf, lengthOf, stageOf, toNextStage, visibility } from '../src/game/growth.js'
 
 describe('단계 문턱', () => {
@@ -103,5 +106,35 @@ describe('detailOf', () => {
       secondDorsal: false, gills: false, teeth: false, scars: false,
     })
     expect(Object.values(detailOf(6)).every(Boolean)).toBe(true)
+  })
+})
+
+
+describe('물자국', () => {
+  it('**가장 흐린 상어보다도 흐리다**', () => {
+    // 이게 이 값들의 존재 이유다. 자국이 상어보다 눈에 띄면 바탕화면에 흰 줄이
+    // 그어진 것으로 보이고, 그 순간 「상어가 지나갔다」가 아니라 「뭐가 묻었다」가 된다.
+    const 가장진한자국 = MAX_ALPHA * WAKE_ALPHA
+    expect(가장진한자국).toBeLessThan(baseAlphaOf(1))
+  })
+
+  it('값을 못 박는다', () => {
+    expect(WAKE_ALPHA).toBe(0.05)
+    expect(WAKE_LIFE).toBe(0.85)
+    expect(WAKE_WIDTH).toBe(0.0022)
+    expect(WAKE_SPREAD).toBe(0.012)
+  })
+
+  it('짧게 남는다 — 길게 끌면 화면에 선이 쌓인다', () => {
+    expect(WAKE_LIFE).toBeLessThan(1)
+  })
+
+  it('선이 몸보다 훨씬 가늘다', () => {
+    // 1단계 상어 길이의 1/8 보다 가늘어야 선으로 보이지 덩어리로 안 보인다.
+    expect(WAKE_WIDTH).toBeLessThan(lengthOf(1) / 8)
+  })
+
+  it('먹은 자리의 동심원도 자국만큼 흐리다', () => {
+    expect(RIPPLE_ALPHA).toBeLessThan(baseAlphaOf(1))
   })
 })

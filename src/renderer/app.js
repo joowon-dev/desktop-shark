@@ -3,7 +3,7 @@
 // 여기는 순수 모듈이 못 하는 것만 한다: 벽시계를 읽고, 화면 크기를 재고, 클릭을 받고,
 // 셸과 이야기하고, 서버에 올린다.
 
-import { DT } from '../game/constants.js'
+import { DT, RIPPLE_REACH, WAKE_LIFE } from '../game/constants.js'
 import {
   createEngine, feedAt, feedTyped, releaseAndNext, setBounds, setGameMode, snapshot, step,
 } from '../game/engine.js'
@@ -100,7 +100,11 @@ function afterStep() {
   if (engine.justAte) {
     const mouthX = engine.swimmer.x
     const mouthY = engine.swimmer.y
-    ripples.push({ x: mouthX, y: mouthY, age: 0, duration: 1.1, maxRadius: 0.12 })
+    // 동심원도 상어 크기를 따라간다. 고정값이면 아기상어가 제 몸의 다섯 배짜리
+    // 물결을 일으킨다.
+    ripples.push({
+      x: mouthX, y: mouthY, age: 0, duration: 0.9, maxRadius: snap.length * RIPPLE_REACH,
+    })
     saveState()
     flashHud()
 
@@ -114,7 +118,7 @@ function afterStep() {
 }
 
 function ageTrails(dt) {
-  wake = wake.map((w) => ({ ...w, age: w.age + dt })).filter((w) => w.age < 1.6)
+  wake = wake.map((w) => ({ ...w, age: w.age + dt })).filter((w) => w.age < WAKE_LIFE)
   ripples = ripples.map((r) => ({ ...r, age: r.age + dt })).filter((r) => r.age < r.duration)
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  EAT_RADIUS, FOOD_KINDS, FOOD_LIFETIME, FOOD_SINK_SPEED, MAX_FOOD,
+  EAT_RADIUS, FOOD_FLOOR, FOOD_KINDS, FOOD_LIFETIME, FOOD_SINK_SPEED, MAX_FOOD,
 } from '../src/game/constants.js'
 import {
   bestFood, canEat, createFood, dropFood, foodAlpha, nearestFood, removeFood, stepFood,
@@ -44,9 +44,22 @@ describe('stepFood', () => {
     expect(seconds).toBeLessThan(FOOD_LIFETIME + 0.1)
   })
 
-  it('화면 아래로 충분히 내려가면 수명 전에도 사라진다', () => {
-    const list = stepFood([{ id: 1, x: 0.5, y: 1.19, age: 0 }], 1)
-    expect(list).toHaveLength(0)
+  it('**바닥에서 멈춘다** — 화면 밖으로 내려가면 상어가 따라 내려간다', () => {
+    const bounds = { w: 16 / 9, h: 1 }
+    let list = [createFood(1, 0.5, 0.5)]
+    for (let i = 0; i < 60 * 30; i += 1) list = stepFood(list, 1 / 60, bounds)
+    // 수명이 다해 사라지기 전까지는 바닥 위에 놓여 있다.
+    list = [createFood(2, 0.5, 0.95)]
+    for (let i = 0; i < 60 * 10; i += 1) list = stepFood(list, 1 / 60, bounds)
+    expect(list[0].y).toBeLessThanOrEqual(bounds.h - FOOD_FLOOR + 1e-9)
+    expect(list[0].y).toBeGreaterThan(0)
+  })
+
+  it('세로로 긴 화면에서도 그 화면의 바닥에서 멈춘다', () => {
+    const tall = { w: 1, h: 16 / 9 }
+    let list = [createFood(1, 0.5, 1.0)]
+    for (let i = 0; i < 60 * 60; i += 1) list = stepFood(list, 1 / 60, tall)
+    expect(list.length === 0 || list[0].y <= tall.h - FOOD_FLOOR + 1e-9).toBe(true)
   })
 })
 

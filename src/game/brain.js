@@ -110,7 +110,10 @@ export function intent(brain, ctx) {
     case 'dash': {
       const prey = bestFood(food, swimmer)
       // 밥이 방금 사라졌다면 제자리를 가리킨다 — 다음 스텝에서 상태가 바뀐다.
+      //
       // **밥 쪽으로는 벽 보정을 걸지 않는다** — 가장자리에 떨어뜨린 밥을 못 먹게 된다.
+      // 그래도 화면 밖으로 안 나가는 이유는 **밥이 이미 화면 안으로 당겨져 있기**
+      // 때문이다(food.js 의 clampFood). 밥이 갈 수 없는 곳은 상어도 못 간다.
       return {
         target: prey ? { x: prey.x, y: prey.y } : { x: swimmer.x, y: swimmer.y },
         speed: CRUISE_SPEED * DASH_MULTIPLIER,
@@ -194,7 +197,7 @@ export function hideDelay(rng) {
   return range(rng, HIDE_MIN, HIDE_MAX)
 }
 
-/** 화면 밖으로 충분히 나갔는가. */
+/** 화면 밖으로 충분히 나갔는가. 이제는 거기까지 갈 일이 없다. */
 export function isOffScreen(point, bounds) {
   return point.x < -OFF_SCREEN || point.x > bounds.w + OFF_SCREEN
     || point.y < -OFF_SCREEN || point.y > bounds.h + OFF_SCREEN

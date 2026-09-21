@@ -68,7 +68,7 @@ export function setGameMode(engine, on) {
  */
 export function feedAt(engine, x, y, kind = 'big') {
   if (!engine.gameMode) return engine
-  const food = dropFood(engine.food, engine.nextFoodId, x, y, kind)
+  const food = dropFood(engine.food, engine.nextFoodId, x, y, kind, engine.bounds)
   if (food === engine.food) return engine // 가득 찼다
   return { ...engine, food, nextFoodId: engine.nextFoodId + 1 }
 }
@@ -89,7 +89,7 @@ export function feedTyped(engine) {
   const x = range(engine.rng, engine.bounds.w * 0.08, engine.bounds.w * 0.92)
   const y = range(engine.rng, engine.bounds.h * 0.12, engine.bounds.h * 0.88)
 
-  const food = dropFood(engine.food, engine.nextFoodId, x, y, 'small')
+  const food = dropFood(engine.food, engine.nextFoodId, x, y, 'small', engine.bounds)
   if (food === engine.food) return engine
   return { ...engine, food, nextFoodId: engine.nextFoodId + 1, lastTypedAt: engine.elapsed }
 }
@@ -119,7 +119,7 @@ export function step(engine, now, dt = DT) {
   const hunger = hungerAt(engine.lastFedAt, now)
 
   // 1. 밥이 가라앉고 늙는다.
-  let food = stepFood(engine.food, dt)
+  let food = stepFood(engine.food, dt, engine.bounds)
 
   // 2. 입이 닿았는가. 먹는 중일 때는 다시 물지 않는다.
   const mouth = mouthOf(engine)
