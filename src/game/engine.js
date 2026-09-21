@@ -22,8 +22,8 @@ export function createEngine(options = {}) {
   return {
     rng,
     bounds,
-    // 처음에는 화면 밖 왼쪽에서 들어온다.
-    swimmer: createSwimmer(-0.3, bounds.h * 0.5, 0, 0),
+    // 처음부터 화면 안에 있다. 밖에서 들어오게 두면 첫 밥을 줘도 한참을 기다린다.
+    swimmer: createSwimmer(bounds.w * 0.25, bounds.h * 0.5, 0, 0),
     brain: createBrain(rng),
     food: [],
     nextFoodId: 1,

@@ -61,13 +61,20 @@ describe('밥을 주면 달려와서 먹는다', () => {
 describe('밥 두 종류', () => {
   it('큰 밥이 작은 밥보다 값지다 — 클릭은 일부러, 타자는 무심코', () => {
     // 값이 같으면 타이핑만으로 몇 분 만에 다 커서 키우는 일이 사라진다.
-    expect(FOOD_KINDS.big.value).toBeGreaterThan(FOOD_KINDS.small.value)
-    expect(FOOD_KINDS.big.value).toBe(3)
+    // 열 배다. 비슷하면 타이핑만으로 다 커 버린다.
+    expect(FOOD_KINDS.big.value).toBe(10)
     expect(FOOD_KINDS.small.value).toBe(1)
+    expect(FOOD_KINDS.big.value / FOOD_KINDS.small.value).toBeGreaterThanOrEqual(10)
   })
 
-  it('큰 밥을 먹으면 3, 작은 밥을 먹으면 1 오른다', () => {
-    for (const [kind, gain] of [['big', 3], ['small', 1]]) {
+  it('밥은 작다 — 바탕화면 위에 늘 떠 있어서 눈에 띄면 거슬린다', () => {
+    expect(FOOD_KINDS.big.radius).toBeLessThanOrEqual(0.008)
+    expect(FOOD_KINDS.small.radius).toBeLessThanOrEqual(0.004)
+    expect(FOOD_KINDS.big.radius).toBeGreaterThan(FOOD_KINDS.small.radius)
+  })
+
+  it('큰 밥을 먹으면 10, 작은 밥을 먹으면 1 오른다', () => {
+    for (const [kind, gain] of [['big', 10], ['small', 1]]) {
       let e = createEngine({ eaten: 0, lastFedAt: 0, seed: 3, bounds, now: 0 })
       e = feedAt(e, bounds.w / 2, 0.5, kind)
       const eaten = runUntilEaten(e)
@@ -156,7 +163,7 @@ describe('mouthOf', () => {
 
   it('상어가 크면 입이 몸통에서 더 멀다', () => {
     const small = createEngine({ eaten: 0, seed: 1, bounds, now: 0 })
-    const big = createEngine({ eaten: 120, seed: 1, bounds, now: 0 })
+    const big = createEngine({ eaten: 1000, seed: 1, bounds, now: 0 })
     const reach = (e) => Math.hypot(mouthOf(e).x - e.swimmer.x, mouthOf(e).y - e.swimmer.y)
     expect(reach(big)).toBeGreaterThan(reach(small))
   })
@@ -178,7 +185,60 @@ describe('snapshot', () => {
 
   it('먹은 개수가 단계로 이어진다', () => {
     expect(snapshot(createEngine({ eaten: 0, bounds, now: 0 })).stage).toBe(1)
-    expect(snapshot(createEngine({ eaten: 35, bounds, now: 0 })).stage).toBe(4)
+    expect(snapshot(createEngine({ eaten: 250, bounds, now: 0 })).stage).toBe(4)
+  })
+})
+
+describe('상어는 화면 밖으로 안 나간다', () => {
+  // **이게 이 게임의 전제다.** 나가 버리면 「바탕화면에 산다」가 아니라 「가끔
+  // 지나간다」가 되고, 밥을 줘도 한참을 기다려야 한다. 오래 굴려서 확인한다.
+  it.each([
+    ['가로로 넓은 화면', { w: 16 / 9, h: 1 }],
+    ['세로로 긴 화면', { w: 1, h: 16 / 9 }],
+    ['정사각 화면', { w: 1, h: 1 }],
+    ['아주 넓은 화면', { w: 3.2, h: 1 }],
+  ])('%s — 10분 동안 한 번도 안 나간다', (_label, screen) => {
+    for (const seed of [1, 7, 42, 1234]) {
+      let e = createEngine({ eaten: 0, lastFedAt: 0, seed, bounds: screen, now: 0 })
+      let now = 0
+      let worst = { x: 0, y: 0, out: 0 }
+
+      for (let i = 0; i < 60 * 600; i += 1) {
+        now += DT * 1000
+        e = step(e, now, DT)
+        const out = Math.max(
+          -e.swimmer.x, e.swimmer.x - screen.w,
+          -e.swimmer.y, e.swimmer.y - screen.h,
+        )
+        if (out > worst.out) worst = { x: e.swimmer.x, y: e.swimmer.y, out }
+      }
+
+      // 몸 길이의 절반쯤은 코가 걸칠 수 있다. 통째로 나가면 안 된다.
+      expect(worst.out, `seed ${seed} 에서 (${worst.x.toFixed(2)}, ${worst.y.toFixed(2)})`)
+        .toBeLessThan(0.1)
+    }
+  })
+
+  it('굶어서 에워싸는 동안에도 화면 안이다', () => {
+    const screen = { w: 16 / 9, h: 1 }
+    let e = createEngine({ eaten: 0, lastFedAt: null, seed: 5, bounds: screen, now: 0 })
+    let now = 0
+    for (let i = 0; i < 60 * 300; i += 1) {
+      now += DT * 1000
+      e = step(e, now, DT)
+      expect(e.swimmer.x).toBeGreaterThan(-0.1)
+      expect(e.swimmer.x).toBeLessThan(screen.w + 0.1)
+      expect(e.swimmer.y).toBeGreaterThan(-0.1)
+      expect(e.swimmer.y).toBeLessThan(screen.h + 0.1)
+    }
+  })
+
+  it('처음부터 화면 안에 있다 — 밖에서 들어오길 기다리지 않는다', () => {
+    const e = createEngine({ bounds, now: 0 })
+    expect(e.swimmer.x).toBeGreaterThan(0)
+    expect(e.swimmer.x).toBeLessThan(bounds.w)
+    expect(e.swimmer.y).toBeGreaterThan(0)
+    expect(e.swimmer.y).toBeLessThan(bounds.h)
   })
 })
 

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { createBrain, intent, isOffScreen, STATES, stepBrain } from '../src/game/brain.js'
+import {
+  createBrain, intent, isOffScreen, keepInside, STATES, stepBrain,
+} from '../src/game/brain.js'
 import { createFood } from '../src/game/food.js'
 import { EAT_DURATION, PROWL_THRESHOLD, SATED_DURATION } from '../src/game/constants.js'
 import { makeRng } from '../src/game/rng.js'
@@ -99,13 +101,12 @@ describe('숨음 ↔ 순찰', () => {
     expect(stepBrain(brain, ctx(), 1 / 60).state).toBe('cruise')
   })
 
-  it('화면 밖으로 나가면 다시 숨는다', () => {
-    const brain = { ...createBrain(rng()), state: 'cruise', timer: 99 }
-    const out = { x: bounds.w + 1, y: 0.5, heading: 0, speed: 0.1 }
-    expect(stepBrain(brain, ctx({ swimmer: out }), 1 / 60).state).toBe('hidden')
+  it('순찰은 시간이 다하면 끝난다 — 화면 밖으로 나가서 끝나지 않는다', () => {
+    const brain = { ...createBrain(rng()), state: 'cruise', timer: 0.01 }
+    expect(stepBrain(brain, ctx(), 1 / 60).state).toBe('hidden')
   })
 
-  it('화면 안에 있는 동안은 계속 순찰한다', () => {
+  it('시간이 남아 있으면 계속 순찰한다', () => {
     const brain = { ...createBrain(rng()), state: 'cruise', timer: 99 }
     expect(stepBrain(brain, ctx(), 1 / 60).state).toBe('cruise')
   })
@@ -146,10 +147,38 @@ describe('intent', () => {
     }
   })
 
-  it('숨을 때의 목표는 화면 밖이다', () => {
-    const brain = { ...createBrain(rng()), state: 'hidden' }
-    const swimmer = { x: 0.8, y: 0.5, heading: 0, speed: 0.1 }
-    const { target } = intent(brain, { swimmer, food: [], bounds })
-    expect(isOffScreen(target, bounds)).toBe(true)
+  it('숨을 때도 목표는 화면 안이다 — 안 보일 뿐 나가지는 않는다', () => {
+    for (let i = 0; i < 24; i += 1) {
+      const brain = { ...createBrain(rng()), state: 'hidden', hideAngle: (i / 24) * Math.PI * 2 }
+      const swimmer = { x: 0.8, y: 0.5, heading: 0, speed: 0.1 }
+      const { target } = intent(brain, { swimmer, food: [], bounds })
+      expect(isOffScreen(target, bounds)).toBe(false)
+    }
+  })
+
+  it('밥은 가장자리에 있어도 그대로 노린다 — 벽 보정을 걸면 못 먹는다', () => {
+    const brain = { ...createBrain(rng()), state: 'dash' }
+    const food = [createFood(1, bounds.w - 0.02, 0.02)]
+    const swimmer = { x: 0.5, y: 0.5, heading: 0, speed: 0.1 }
+    const { target } = intent(brain, { swimmer, food, bounds })
+    expect(target).toEqual({ x: bounds.w - 0.02, y: 0.02 })
+  })
+})
+
+describe('keepInside', () => {
+  it('가장자리 밖의 목표를 화면 안으로 접는다', () => {
+    const swimmer = { x: 0.5, y: 0.5, heading: 0, speed: 0.1 }
+    const inside = keepInside({ x: bounds.w + 5, y: -5 }, swimmer, bounds)
+    expect(isOffScreen(inside, bounds)).toBe(false)
+    expect(inside.x).toBeLessThan(bounds.w)
+    expect(inside.y).toBeGreaterThan(0)
+  })
+
+  it('상어가 벽에 붙어 있으면 반대쪽으로 더 민다', () => {
+    const atLeftWall = { x: 0.02, y: 0.5, heading: Math.PI, speed: 0.1 }
+    const middle = { x: bounds.w / 2, y: 0.5, heading: Math.PI, speed: 0.1 }
+    const straight = { x: 0.0, y: 0.5 }
+    expect(keepInside(straight, atLeftWall, bounds).x)
+      .toBeGreaterThan(keepInside(straight, middle, bounds).x)
   })
 })

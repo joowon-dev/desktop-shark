@@ -34,6 +34,7 @@ private let lastFedKey = "lastFedAt"
 private let playerIdKey = "playerId"
 private let secretKey = "playerSecret"
 private let nicknameKey = "nickname"
+private let rankingKey = "rankingOn"
 private let screenKey = "screenNumber"
 private let webScheme = "shark"
 
@@ -143,6 +144,12 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
         get { UserDefaults.standard.string(forKey: nicknameKey) }
         set { UserDefaults.standard.set(newValue, forKey: nicknameKey) }
     }
+    /// 랭킹에 올릴 것인가. **밥 주기와 달리 이건 저장한다** — 「안 올린다」는 설정이다.
+    /// 등록된 적이 없으면 기본은 켜짐.
+    private var rankingOn: Bool {
+        get { UserDefaults.standard.object(forKey: rankingKey) as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: rankingKey) }
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         buildWindow()
@@ -201,6 +208,7 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
         payload["playerId"] = playerId ?? NSNull()
         payload["secret"] = secret ?? NSNull()
         payload["nickname"] = nickname ?? NSNull()
+        payload["ranking"] = rankingOn
 
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
               let json = String(data: data, encoding: .utf8) else {
@@ -226,6 +234,11 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
           onPanel: (handler) => { window.__sharkPanel = handler },
           onFeed: (handler) => { window.__sharkFeed = handler },
           onType: (handler) => { window.__sharkType = handler },
+          onRanking: (handler) => { window.__sharkRanking = handler },
+          saveRanking: (on) => window.webkit.messageHandlers.shark.postMessage({
+            type: 'ranking', on: !!on,
+          }),
+          closePanel: () => window.webkit.messageHandlers.shark.postMessage({ type: 'closePanel' }),
         }
         // 웹뷰는 콘솔이 안 보인다. 오류만이라도 셸의 stderr 로 흘려보낸다.
         window.addEventListener('error', (e) => window.webkit.messageHandlers.shark.postMessage({
@@ -285,6 +298,11 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
         let panel = NSMenuItem(title: "랭킹 · 계정  ⌥⇧R", action: #selector(togglePanel), keyEquivalent: "")
         panel.target = self
         menu.addItem(panel)
+
+        let ranking = NSMenuItem(title: "랭킹에 올리기", action: #selector(toggleRanking), keyEquivalent: "")
+        ranking.target = self
+        ranking.state = rankingOn ? .on : .off
+        menu.addItem(ranking)
 
         if NSScreen.screens.count > 1 { menu.addItem(screenMenu()) }
         menu.addItem(.separator())
@@ -487,6 +505,13 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
         refreshMenu()
     }
 
+    /// 랭킹을 켜고 끈다. 끄면 아무것도 서버로 안 보낸다 — 상어는 그대로 자란다.
+    @objc private func toggleRanking() {
+        rankingOn = !rankingOn
+        webView.evaluateJavaScript("window.__sharkRanking && window.__sharkRanking(\(rankingOn))")
+        refreshMenu()
+    }
+
     @objc private func togglePanel() {
         guard window.isVisible else { return }
         setPanel(!panelOpen)
@@ -551,6 +576,13 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
             playerId = body["playerId"] as? String
             secret = body["secret"] as? String
             nickname = body["nickname"] as? String
+
+        case "ranking":
+            rankingOn = body["on"] as? Bool ?? true
+            refreshMenu()
+
+        case "closePanel":
+            setPanel(false)
 
         case "status":
             let stage = body["stage"] as? Int ?? 1

@@ -4,26 +4,26 @@ import { baseAlphaOf, detailOf, lengthOf, stageOf, toNextStage, visibility } fro
 
 describe('단계 문턱', () => {
   it('값을 못 박는다 — 서버의 shark_stage 와 같아야 한다', () => {
-    expect(STAGE_THRESHOLDS).toEqual([0, 5, 15, 35, 70, 120])
+    expect(STAGE_THRESHOLDS).toEqual([0, 30, 100, 250, 550, 1000])
   })
 
   it.each([
-    [0, 1], [4, 1],
-    [5, 2], [14, 2],
-    [15, 3], [34, 3],
-    [35, 4], [69, 4],
-    [70, 5], [119, 5],
-    [120, 6], [9999, 6],
-  ])('%i 개 먹으면 %i단계', (eaten, stage) => {
+    [0, 1], [29, 1],
+    [30, 2], [99, 2],
+    [100, 3], [249, 3],
+    [250, 4], [549, 4],
+    [550, 5], [999, 5],
+    [1000, 6], [99999, 6],
+  ])('%i 점이면 %i단계', (eaten, stage) => {
     expect(stageOf(eaten)).toBe(stage)
   })
 
-  it('다음 단계까지 남은 개수를 센다', () => {
-    expect(toNextStage(0)).toBe(5)
-    expect(toNextStage(4)).toBe(1)
-    expect(toNextStage(5)).toBe(10)
-    // 다 큰 상어는 0 이 아니라 null 이다 — 「한 개 남았다」와 「다 컸다」는 다른 말이다.
-    expect(toNextStage(120)).toBe(null)
+  it('다음 단계까지 남은 점수를 센다', () => {
+    expect(toNextStage(0)).toBe(30)
+    expect(toNextStage(29)).toBe(1)
+    expect(toNextStage(30)).toBe(70)
+    // 다 큰 상어는 0 이 아니라 null 이다 — 「1 점 남았다」와 「다 컸다」는 다른 말이다.
+    expect(toNextStage(1000)).toBe(null)
   })
 })
 

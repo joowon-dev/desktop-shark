@@ -76,6 +76,10 @@ sealed class OverlayContext : ApplicationContext
             Checked = overlay.GameMode,
         });
         menu.Items.Add(new ToolStripMenuItem("랭킹 · 계정  Alt+Shift+R", null, (_, _) => overlay.TogglePanel()));
+        menu.Items.Add(new ToolStripMenuItem("랭킹에 올리기", null, (_, _) => overlay.ToggleRanking())
+        {
+            Checked = overlay.RankingOn,
+        });
 
         if (Screen.AllScreens.Length > 1) menu.Items.Add(ScreenMenu());
         menu.Items.Add(new ToolStripSeparator());
@@ -238,6 +242,11 @@ sealed class Overlay : Form
     public string? PlayerId { get; private set; }
     public string? Secret { get; private set; }
     public string? Nickname { get; private set; }
+
+    /// <summary>
+    /// 랭킹에 올릴 것인가. <b>밥 주기와 달리 이건 저장한다</b> — 「안 올린다」는 설정이다.
+    /// </summary>
+    public bool RankingOn { get; private set; } = true;
 
     /// <summary>얹을 모니터의 장치 이름. 없거나 사라졌으면 주 화면.</summary>
     public string? ScreenName { get; private set; }
@@ -463,6 +472,7 @@ sealed class Overlay : Form
         playerId = PlayerId,
         secret = Secret,
         nickname = Nickname,
+        ranking = RankingOn,
     });
 
     /// <summary>맥 셸과 <b>같은 모양</b>의 다리. 한쪽만 고치면 두 플랫폼이 다른 게임이 된다.</summary>
@@ -482,6 +492,9 @@ sealed class Overlay : Form
           onPanel: (handler) => { window.__sharkPanel = handler },
           onFeed: (handler) => { window.__sharkFeed = handler },
           onType: (handler) => { window.__sharkType = handler },
+          onRanking: (handler) => { window.__sharkRanking = handler },
+          saveRanking: (on) => window.chrome.webview.postMessage({ type: 'ranking', on: !!on }),
+          closePanel: () => window.chrome.webview.postMessage({ type: 'closePanel' }),
         }
         window.addEventListener('error', (e) => window.chrome.webview.postMessage({
           type: 'log', text: `${e.message} (${e.filename}:${e.lineno})`,
@@ -528,6 +541,15 @@ sealed class Overlay : Form
         var style = GetWindowLong(Handle, GWL_EXSTYLE);
         SetWindowLong(Handle, GWL_EXSTYLE,
             wantPass ? style | WS_EX_TRANSPARENT : style & ~WS_EX_TRANSPARENT);
+    }
+
+    /// <summary>랭킹을 켜고 끈다. 끄면 아무것도 서버로 안 보낸다 — 상어는 그대로 자란다.</summary>
+    public void ToggleRanking()
+    {
+        RankingOn = !RankingOn;
+        WriteState();
+        Send($"window.__sharkRanking && window.__sharkRanking({(RankingOn ? "true" : "false")})");
+        SettingsChanged?.Invoke();
     }
 
     public void TogglePanel()
@@ -619,6 +641,16 @@ sealed class Overlay : Form
                     WriteState();
                     return;
 
+                case "ranking":
+                    RankingOn = body.TryGetProperty("on", out var r) && r.ValueKind == JsonValueKind.True;
+                    WriteState();
+                    SettingsChanged?.Invoke();
+                    return;
+
+                case "closePanel":
+                    SetPanel(false);
+                    return;
+
                 case "status":
                     var stage = body.TryGetProperty("stage", out var s) ? s.GetInt32() : 1;
                     var hunger = Str(body, "hunger") ?? "";
@@ -649,6 +681,7 @@ sealed class Overlay : Form
             Secret = Str(json, "secret");
             Nickname = Str(json, "nickname");
             ScreenName = Str(json, "screen");
+            RankingOn = !json.TryGetProperty("ranking", out var rank) || rank.ValueKind != JsonValueKind.False;
         }
         catch
         {
@@ -669,6 +702,7 @@ sealed class Overlay : Form
                 playerId = PlayerId,
                 secret = Secret,
                 nickname = Nickname,
+                ranking = RankingOn,
                 screen = ScreenName,
             }));
         }

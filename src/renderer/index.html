@@ -24,10 +24,19 @@
 
     <!-- ⌥⇧R 로 여는 패널. 여기만 클릭·타이핑을 받는다. -->
     <div id="panel" hidden>
+      <button id="close-panel" title="닫기 (⌥⇧R)" aria-label="닫기">×</button>
       <h1>바탕화면 상어</h1>
 
+      <label id="ranking-switch">
+        <input id="ranking-on" type="checkbox" checked />
+        <span>랭킹에 올리기</span>
+      </label>
+      <p class="muted" id="ranking-note">
+        끄면 아무것도 서버로 안 보냅니다. 상어는 그대로 자랍니다.
+      </p>
+
       <section id="account">
-        <p class="muted" id="account-state">계정이 없습니다. 랭킹에 올리려면 이름을 정하세요.</p>
+        <p class="muted" id="account-state">계정이 없습니다.</p>
         <div class="row">
           <input id="nickname" type="text" maxlength="12" placeholder="별명 (최대 12자)" />
           <button id="save-nickname">저장</button>
@@ -50,7 +59,7 @@
         <ol id="ranking-list"><li class="muted">불러오는 중…</li></ol>
       </section>
 
-      <p class="muted hint">⌥⇧S 게임모드 · ⌥⇧R 이 패널 · ⌥⇧H 숨기기</p>
+      <p class="muted hint">⌥⇧S 밥 주기 멈추기 · ⌥⇧R 이 패널 · ⌥⇧H 숨기기</p>
     </div>
 
     <script type="module" src="app.js"></script>

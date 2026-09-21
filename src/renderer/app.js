@@ -29,6 +29,12 @@ const bridge = window.sneaky ?? null
 
 let engine = createEngine({ seed: (Date.now() & 0xffff) | 1, now: Date.now() })
 let account = { playerId: null, secret: null, nickname: null }
+
+/** 랭킹에 올릴 것인가. 끄면 아무것도 서버로 안 보낸다. 셸이 저장한다. */
+let rankingOn = true
+
+/** 자동 등록이 도는 중인가. 밥을 연달아 주면 두 번 등록되는 것을 막는다. */
+let registering = false
 let view = { width: 0, height: 0, scale: 1 }
 
 /** 지느러미가 지나간 자리. 그리는 데만 쓴다. */
@@ -113,7 +119,7 @@ function refreshHud() {
 
   const left = toNextStage(snap.eaten)
   document.getElementById('hud-next').textContent =
-    left === null ? '다 컸다' : `다음까지 ${left}`
+    left === null ? '다 컸다' : `다음까지 ${left}점`
 
   bridge?.setStatus?.({ stage: snap.stage, hunger: hungerLabel(snap.hunger), eaten: snap.eaten })
 }
@@ -133,6 +139,7 @@ function saveState() {
 /** 셸이 전역으로 들은 클릭. 화면 좌표(CSS 픽셀)로 온다. */
 bridge?.onFeed?.((x, y) => {
   engine = feedAt(engine, x / view.scale, y / view.scale, 'big')
+  ensureAccount()
   flashHud()
 })
 
@@ -185,8 +192,33 @@ bridge?.onGameMode?.((on) => applyGameMode(on))
 // (별명을 타이핑해야 한다) 셸 쪽이 먼저 알아야 하기 때문이다.
 bridge?.onPanel?.((open) => {
   panel.hidden = !open
-  if (open) refreshRanking()
+  if (open && rankingOn) refreshRanking()
 })
+
+/** 셸이 저장해 둔 랭킹 스위치를 받아 온다. */
+bridge?.onRanking?.((on) => applyRanking(on, false))
+
+document.getElementById('close-panel').addEventListener('click', () => {
+  // 셸이 패널 상태를 들고 있으므로(포커스를 넘겼다 돌려받아야 한다) 셸에 맡긴다.
+  bridge?.closePanel?.()
+  panel.hidden = true
+})
+
+document.getElementById('ranking-on').addEventListener('change', (event) => {
+  applyRanking(event.target.checked, true)
+})
+
+/**
+ * 랭킹을 켜고 끈다. 끄면 **아무것도 서버로 안 보낸다** — 밀린 줄도 버린다.
+ * 상어는 그대로 자란다. 랭킹은 게임이 아니라 곁다리이므로 꺼도 잃는 것이 없어야 한다.
+ */
+function applyRanking(on, save) {
+  rankingOn = !!on
+  document.getElementById('ranking-on').checked = rankingOn
+  panel.classList.toggle('ranking-off', !rankingOn)
+  if (save) bridge?.saveRanking?.(rankingOn)
+  if (rankingOn && !panel.hidden) refreshRanking()
+}
 
 // MARK: 서버 — 없어도 게임은 전부 된다
 
@@ -194,8 +226,48 @@ bridge?.onPanel?.((open) => {
  * 밀린 것을 흘려보낸다. **실패는 조용히 삼킨다** —
  * 랭킹이 안 되는 것과 게임이 안 되는 것은 다른 일이다.
  */
+/**
+ * 계정이 없으면 **첫 밥을 준 순간 임의 별명으로 만든다.**
+ *
+ * 이름부터 정하라고 하면 대부분 패널을 열지 않고, 열지 않으면 랭킹이 비어 있다.
+ * 먼저 올려 두고 이름은 나중에 바꾸게 한다 — 바꿔도 같은 계정이다.
+ * 실패는 조용히 삼킨다. 다음 밥에서 다시 해 본다.
+ */
+async function ensureAccount() {
+  if (account.playerId || registering || !rankingOn) return
+  registering = true
+  try {
+    const secret = newSecret(randomBytes)
+    let nickname = defaultNickname(randomBytes)
+    let playerId = null
+
+    // 이름이 겹치면 몇 번 다시 뽑는다 — 네 자리 숫자라 드물지만 사람이 늘면 부딪힌다.
+    for (let attempt = 0; attempt < 5 && !playerId; attempt += 1) {
+      try {
+        playerId = await registerPlayer(nickname, secret)
+      } catch (error) {
+        if (!error.message.includes('nickname_taken')) throw error
+        nickname = defaultNickname(randomBytes)
+      }
+    }
+    if (!playerId) return
+
+    account = { playerId, secret, nickname }
+    bridge?.saveAccount?.(account)
+    showAccount()
+  } catch (error) {
+    console.error(`자동 등록 실패 (다음에 다시): ${error.message}`)
+  } finally {
+    registering = false
+  }
+}
+
 async function flush() {
-  if (!account.playerId || engine.pending <= 0) return
+  if (!rankingOn || engine.pending <= 0) return
+  if (!account.playerId) {
+    await ensureAccount()
+    return
+  }
 
   const count = nextBatch(engine.pending)
   try {
@@ -233,7 +305,7 @@ async function refreshRanking() {
       li.innerHTML = '<span class="rank"></span><span class="name"></span><span class="eaten"></span>'
       li.querySelector('.rank').textContent = row.rank
       li.querySelector('.name').textContent = row.nickname
-      li.querySelector('.eaten').textContent = `${row.stage}단계 · ${row.eaten}개`
+      li.querySelector('.eaten').textContent = `${row.stage}단계 · ${row.eaten}점`
       list.appendChild(li)
     }
 
@@ -255,11 +327,11 @@ function showAccount() {
   const codeBox = document.getElementById('my-code')
 
   if (account.playerId) {
-    state.textContent = `${account.nickname} 으로 랭킹에 오릅니다.`
+    state.textContent = `${account.nickname} 으로 랭킹에 오릅니다. 이름은 바꿔도 됩니다.`
     document.getElementById('nickname').value = account.nickname ?? ''
     codeBox.textContent = recoveryCode(account.playerId, account.secret)
   } else {
-    state.textContent = '계정이 없습니다. 랭킹에 올리려면 이름을 정하세요.'
+    state.textContent = '첫 밥을 주면 이름이 자동으로 만들어집니다.'
     codeBox.textContent = ''
   }
 }
@@ -332,6 +404,8 @@ async function start() {
     bounds: engine.bounds,
     now: Date.now(),
   })
+
+  if (saved.ranking === false) applyRanking(false, false)
 
   if (saved.playerId && saved.secret) {
     account = { playerId: saved.playerId, secret: saved.secret, nickname: saved.nickname ?? null }

@@ -84,6 +84,53 @@ body {
   display: none;
 }
 
+/* 닫기 — 패널 오른쪽 위. 핫키를 모르는 사람이 빠져나갈 길이 있어야 한다. */
+#close-panel {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(226, 246, 255, 0.7);
+  font-size: 16px;
+  line-height: 1;
+}
+
+#close-panel:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: rgba(240, 250, 255, 0.95);
+}
+
+#ranking-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+#ranking-switch input {
+  width: 15px;
+  height: 15px;
+  accent-color: rgb(90, 190, 230);
+  cursor: pointer;
+}
+
+#ranking-note {
+  margin: 4px 0 4px 23px;
+  font-size: 11px;
+}
+
+/* 랭킹을 끄면 계정도 순위도 쓸모가 없다. 통째로 흐리고 잠근다. */
+#panel.ranking-off #account,
+#panel.ranking-off #ranking {
+  opacity: 0.32;
+  pointer-events: none;
+}
+
 #panel h1 {
   font-size: 15px;
   font-weight: 600;

@@ -7,8 +7,8 @@
 // 좌표는 화면 짧은 변을 1 로 본 정규 좌표. bounds = { w, h } 로 화면 크기를 받는다.
 
 import {
-  CRUISE_SPEED, DASH_MULTIPLIER, DASH_TURN_RATE, EAT_DURATION, HIDE_MAX, HIDE_MIN,
-  PROWL_SPEED, SATED_DURATION, SATED_SPEED, TURN_RATE,
+  CRUISE_MAX, CRUISE_MIN, CRUISE_SPEED, DASH_MULTIPLIER, DASH_TURN_RATE, EAT_DURATION,
+  HIDE_MAX, HIDE_MIN, PROWL_SPEED, SATED_DURATION, SATED_SPEED, TURN_RATE, WALL_MARGIN,
 } from './constants.js'
 import { isHungry } from './hunger.js'
 import { bestFood } from './food.js'
@@ -16,18 +16,44 @@ import { range } from './rng.js'
 
 export const STATES = ['hidden', 'cruise', 'prowl', 'dash', 'eat', 'sated']
 
-/** 화면 밖으로 이만큼 나가면 「사라졌다」로 본다. */
+/** 화면 밖으로 이만큼 나가면 「사라졌다」로 본다. 이제는 거기까지 갈 일이 없다. */
 const OFF_SCREEN = 0.35
 
 export function createBrain(rng) {
   return {
     state: 'hidden',
     timer: range(rng, HIDE_MIN, HIDE_MAX),
-    /** 에워쌀 때 도는 각도. 상태가 이어지는 동안만 뜻이 있다. */
+    /** 에워쌀 때·숨을 때 도는 각도. */
     prowlAngle: range(rng, 0, Math.PI * 2),
-    /** 숨었을 때 물러나 있는 방향. */
+    /** 숨었을 때 머무는 쪽. 화면 안이다. */
     hideAngle: range(rng, 0, Math.PI * 2),
   }
+}
+
+/**
+ * 목표를 화면 안으로 끌어온다.
+ *
+ * **상어는 화면 밖으로 나가지 않는다.** 나가면 「바탕화면에 산다」가 아니라 「가끔
+ * 지나간다」가 되고, 밥을 줘도 한참을 기다려야 한다. 가장자리 띠(WALL_MARGIN) 안에
+ * 들어오면 목표를 안쪽으로 밀어서 스스로 크게 선회해 돌아 나오게 한다 —
+ * 위치를 억지로 붙잡지 않으므로 벽에 부딪혀 미끄러지는 모양이 안 나온다.
+ */
+export function keepInside(target, swimmer, bounds) {
+  const m = WALL_MARGIN
+  let { x, y } = target
+
+  // 목표 자체를 띠 안쪽으로 접는다.
+  x = Math.max(m, Math.min(bounds.w - m, x))
+  y = Math.max(m, Math.min(bounds.h - m, y))
+
+  // 상어가 이미 띠에 들어와 있으면 그만큼 더 안쪽을 가리킨다. 가까울수록 세게 민다.
+  const push = (distance) => Math.max(0, 1 - distance / m)
+  x += push(swimmer.x) * m * 1.6
+  x -= push(bounds.w - swimmer.x) * m * 1.6
+  y += push(swimmer.y) * m * 1.6
+  y -= push(bounds.h - swimmer.y) * m * 1.6
+
+  return { x, y }
 }
 
 /**
@@ -41,26 +67,28 @@ export function intent(brain, ctx) {
 
   switch (brain.state) {
     case 'hidden': {
-      // 화면 밖 먼 곳. 실제로 거기 닿을 일은 없고, 방향만 쓴다.
-      const far = Math.max(bounds.w, bounds.h) * 1.5
+      // **화면 안에 있다.** 보이지 않을 뿐(가시성 배율이 0) 밖으로 나가지는 않는다.
+      // 한쪽 구석에서 느리게 맴돌다 순찰 시간이 되면 나온다.
+      const radius = Math.min(bounds.w, bounds.h) * 0.30
       return {
-        target: {
-          x: center.x + Math.cos(brain.hideAngle) * far,
-          y: center.y + Math.sin(brain.hideAngle) * far,
-        },
-        speed: CRUISE_SPEED * 0.7,
+        target: keepInside({
+          x: center.x + Math.cos(brain.hideAngle) * radius,
+          y: center.y + Math.sin(brain.hideAngle) * radius,
+        }, swimmer, bounds),
+        speed: CRUISE_SPEED * 0.55,
         turnRate: TURN_RATE,
       }
     }
 
     case 'cruise': {
-      // 반대편으로 가로지른다. 지금 향한 쪽의 화면 밖 한 점.
-      const far = Math.max(bounds.w, bounds.h) * 1.2
+      // 지금 향한 쪽으로 곧장 나아간다. 가장자리에 닿으면 keepInside 가 안쪽으로
+      // 끌어당겨서 스스로 크게 선회한다 — 화면을 벗어나지 않는다.
+      const far = Math.max(bounds.w, bounds.h)
       return {
-        target: {
+        target: keepInside({
           x: swimmer.x + Math.cos(swimmer.heading) * far,
           y: swimmer.y + Math.sin(swimmer.heading) * far,
-        },
+        }, swimmer, bounds),
         speed: CRUISE_SPEED,
         turnRate: TURN_RATE,
       }
@@ -68,12 +96,12 @@ export function intent(brain, ctx) {
 
     case 'prowl': {
       // 화면 가장자리를 따라 도는 큰 원. 보채는 것이 보이도록 화면 안에 머문다.
-      const radius = Math.min(bounds.w, bounds.h) * 0.42
+      const radius = Math.min(bounds.w, bounds.h) * 0.38
       return {
-        target: {
+        target: keepInside({
           x: center.x + Math.cos(brain.prowlAngle) * radius,
           y: center.y + Math.sin(brain.prowlAngle) * radius,
-        },
+        }, swimmer, bounds),
         speed: PROWL_SPEED,
         turnRate: TURN_RATE,
       }
@@ -82,6 +110,7 @@ export function intent(brain, ctx) {
     case 'dash': {
       const prey = bestFood(food, swimmer)
       // 밥이 방금 사라졌다면 제자리를 가리킨다 — 다음 스텝에서 상태가 바뀐다.
+      // **밥 쪽으로는 벽 보정을 걸지 않는다** — 가장자리에 떨어뜨린 밥을 못 먹게 된다.
       return {
         target: prey ? { x: prey.x, y: prey.y } : { x: swimmer.x, y: swimmer.y },
         speed: CRUISE_SPEED * DASH_MULTIPLIER,
@@ -95,10 +124,10 @@ export function intent(brain, ctx) {
     case 'sated':
     default:
       return {
-        target: {
+        target: keepInside({
           x: center.x + Math.cos(brain.prowlAngle) * Math.min(bounds.w, bounds.h) * 0.25,
           y: center.y + Math.sin(brain.prowlAngle) * Math.min(bounds.w, bounds.h) * 0.25,
-        },
+        }, swimmer, bounds),
         speed: SATED_SPEED,
         turnRate: TURN_RATE,
       }
@@ -132,30 +161,31 @@ export function stepBrain(brain, ctx, dt) {
 
     case 'dash':
       // 쫓던 밥이 사라졌다(수명이 다했거나). 숨는다.
-      if (food.length === 0) return { ...next, state: 'hidden', timer: hideDelay(rng), hideAngle: awayAngle(swimmer, bounds) }
+      if (food.length === 0) return { ...next, state: 'hidden', timer: hideDelay(rng), hideAngle: nearbyAngle(swimmer, bounds) }
       return next
 
     case 'sated':
       if (food.length > 0) return { ...next, state: 'dash' }
-      if (next.timer <= 0) return { ...next, state: 'hidden', timer: hideDelay(rng), hideAngle: awayAngle(swimmer, bounds) }
+      if (next.timer <= 0) return { ...next, state: 'hidden', timer: hideDelay(rng), hideAngle: nearbyAngle(swimmer, bounds) }
       return next
 
     case 'prowl':
       if (food.length > 0) return { ...next, state: 'dash' }
-      if (!isHungry(hunger)) return { ...next, state: 'hidden', timer: hideDelay(rng), hideAngle: awayAngle(swimmer, bounds) }
+      if (!isHungry(hunger)) return { ...next, state: 'hidden', timer: hideDelay(rng), hideAngle: nearbyAngle(swimmer, bounds) }
       return next
 
     case 'cruise':
       if (food.length > 0) return { ...next, state: 'dash' }
       if (isHungry(hunger)) return { ...next, state: 'prowl' }
-      if (isOffScreen(swimmer, bounds)) return { ...next, state: 'hidden', timer: hideDelay(rng), hideAngle: awayAngle(swimmer, bounds) }
+      // **화면 밖으로 나가서 끝나지 않는다** — 정해진 시간만큼 돌다 다시 숨는다.
+      if (next.timer <= 0) return { ...next, state: 'hidden', timer: hideDelay(rng), hideAngle: nearbyAngle(swimmer, bounds) }
       return next
 
     case 'hidden':
     default:
       if (food.length > 0) return { ...next, state: 'dash' }
       if (isHungry(hunger)) return { ...next, state: 'prowl' }
-      if (next.timer <= 0) return { ...next, state: 'cruise', timer: 0 }
+      if (next.timer <= 0) return { ...next, state: 'cruise', timer: range(rng, CRUISE_MIN, CRUISE_MAX) }
       return next
   }
 }
@@ -170,7 +200,7 @@ export function isOffScreen(point, bounds) {
     || point.y < -OFF_SCREEN || point.y > bounds.h + OFF_SCREEN
 }
 
-/** 숨을 때 물러날 방향 — 화면 중심의 반대쪽. 나갔던 쪽으로 계속 나간다. */
-function awayAngle(point, bounds) {
+/** 숨을 때 머물 쪽 — 지금 있는 쪽. 화면 안이다. */
+function nearbyAngle(point, bounds) {
   return Math.atan2(point.y - bounds.h / 2, point.x - bounds.w / 2)
 }
