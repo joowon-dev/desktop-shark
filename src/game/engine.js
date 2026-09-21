@@ -12,13 +12,13 @@ import { canEat, dropFood, nearestFood, removeFood, stepFood } from './food.js'
 import { range } from './rng.js'
 import { hungerAt } from './hunger.js'
 import { lengthOf, stageOf, visibility } from './growth.js'
-import { FIRST_SPECIES, collect, pickSpecies, speciesOf } from './species.js'
+import { FIRST_SPECIES, isUnlocked, speciesOf, unlockedSpecies } from './species.js'
 import { makeRng } from './rng.js'
 import { createSwimmer, step as swimStep } from './swim.js'
 import { enqueueFeed } from './sync.js'
 
 /**
- * @param {{eaten?: number, lastFedAt?: number|null, seed?: number, bounds?: {w,h}, now?: number}} options
+ * @param {{total?, grown?, species?, frozen?, pinnedStage?, lastFedAt?, seed?, bounds?, now?}} options
  */
 export function createEngine(options = {}) {
   const bounds = options.bounds ?? { w: 16 / 9, h: 1 }
@@ -31,12 +31,29 @@ export function createEngine(options = {}) {
     brain: createBrain(rng),
     food: [],
     nextFoodId: 1,
-    eaten: options.eaten ?? 0,
-    lastFedAt: options.lastFedAt ?? null,
-    /** 지금 키우는 상어의 종. 한 마리가 사는 동안 안 바뀐다. */
+    /**
+     * **전체 누적.** 어떤 종을 데리고 있든, 고정해 두었든 먹은 점수는 전부 여기 쌓인다.
+     * 종을 여는 데만 쓴다.
+     */
+    total: options.total ?? 0,
+    /**
+     * **종마다 따로 키운 점수.** 지금 데리고 있는 종만 오른다(고정하지 않았다면).
+     * 한 덩어리로 두면 새 종을 열자마자 6단계로 나와서 키우는 일이 사라진다.
+     */
+    grown: { ...(options.grown ?? {}) },
+    /** 지금 데리고 있는 종. 열린 종 중에서 언제든 바꿀 수 있다. */
     species: options.species ?? FIRST_SPECIES,
-    /** 6단계까지 키워 본 종들. 도감이다. */
-    collected: options.collected ?? [],
+    /**
+     * 성장을 멈췄는가. 멈춰도 **전체 누적은 계속 쌓여서 다음 종은 열린다.**
+     * 「이 모습이 마음에 든다」를 위한 것이다.
+     */
+    frozen: options.frozen ?? false,
+    /**
+     * 보여줄 단계를 못 박았는가. null 이면 키운 만큼 보여 준다.
+     * **이미 지나온 단계로만 돌아갈 수 있다** — 안 키운 모습을 미리 볼 수는 없다.
+     */
+    pinnedStage: options.pinnedStage ?? null,
+    lastFedAt: options.lastFedAt ?? null,
     now: options.now ?? 0,
     /**
      * 밥 주기. **기본이 켜짐이다** — 앱을 띄우면 늘 상어가 먹고 있고,
@@ -102,9 +119,46 @@ export function feedTyped(engine) {
   return { ...engine, food, nextFoodId: engine.nextFoodId + 1, lastTypedAt: engine.elapsed }
 }
 
+/** 지금 종을 키운 점수. */
+export function grownOf(engine, species = engine.species) {
+  return engine.grown[species] ?? 0
+}
+
+/** 그 종에서 **도달한** 최고 단계. 되돌아갈 수 있는 상한이다. */
+export function reachedStage(engine, species = engine.species) {
+  return stageOf(grownOf(engine, species))
+}
+
+/** 지금 화면에 보여 줄 단계. 못 박아 두었으면 그것, 아니면 키운 만큼. */
+export function shownStage(engine) {
+  const reached = reachedStage(engine)
+  if (engine.pinnedStage == null) return reached
+  return Math.max(1, Math.min(reached, engine.pinnedStage))
+}
+
 /** 이 상어의 몸 길이. 종마다 배율이 다르다. */
 export function lengthNow(engine) {
-  return lengthOf(stageOf(engine.eaten)) * speciesOf(engine.species).size
+  return lengthOf(shownStage(engine)) * speciesOf(engine.species).size
+}
+
+/**
+ * 데리고 다닐 종을 바꾼다. **열린 종만** 된다.
+ * 단계 못 박기는 종마다 다르므로 푼다.
+ */
+export function chooseSpecies(engine, species) {
+  if (!isUnlocked(species, engine.total, engine.grown)) return engine
+  return { ...engine, species, pinnedStage: null }
+}
+
+/** 성장을 멈추거나 다시 자라게 한다. */
+export function setFrozen(engine, frozen) {
+  return { ...engine, frozen: !!frozen }
+}
+
+/** 보여 줄 단계를 못 박는다. null 이면 키운 만큼. 지나온 단계까지만. */
+export function pinStage(engine, stage) {
+  if (stage == null) return { ...engine, pinnedStage: null }
+  return { ...engine, pinnedStage: Math.max(1, Math.min(reachedStage(engine), stage)) }
 }
 
 /** 상어의 입 — 코끝. 밥을 먹었는지는 몸통이 아니라 여기로 잰다. */
@@ -135,12 +189,18 @@ export function step(engine, now, dt = DT) {
   const reach = Math.max(EAT_RADIUS, lengthNow(engine) * EAT_REACH)
   const ateThisStep = engine.brain.state !== 'eat' && canEat(prey, mouth, reach)
 
-  let { eaten, lastFedAt, pending } = engine
+  let { total, lastFedAt, pending } = engine
+  let grown = engine.grown
   if (ateThisStep) {
     // 큰 밥은 작은 밥보다 값지다. 클릭은 일부러 하는 것이고 타자는 무심코 하는 것이다.
     const value = prey.value ?? 1
     food = removeFood(food, prey.id)
-    eaten += value
+    // **전체 누적은 언제나 오른다.** 고정해 두어도 다음 종은 열린다.
+    total += value
+    // 지금 종은 고정하지 않았을 때만 자란다.
+    if (!engine.frozen) {
+      grown = { ...grown, [engine.species]: (grown[engine.species] ?? 0) + value }
+    }
     lastFedAt = now
     pending = enqueueFeed(pending, value)
   }
@@ -164,18 +224,15 @@ export function step(engine, now, dt = DT) {
   const pace = speciesOf(engine.species).speed
   const swimmer = swimStep(engine.swimmer, want.target, want.speed * pace, dt, want.turnRate)
 
-  // 5. 다 크면 도감에 오른다. **키우는 동안 저절로 오른다** — 따로 누를 것이 없다.
-  const collected = stageOf(eaten) >= 6 ? collect(engine.collected, engine.species) : engine.collected
-
   return {
     ...engine,
-    collected,
+    total,
+    grown,
     // 꼬리는 빠를수록 자주 젓는다. **더한다** — 곱하지 않는다.
     tailPhase: engine.tailPhase + (TAIL_BASE_RATE + Math.abs(swimmer.speed) * TAIL_SPEED_RATE) * dt,
     food,
     swimmer,
     brain,
-    eaten,
     lastFedAt,
     pending,
     now,
@@ -184,37 +241,24 @@ export function step(engine, now, dt = DT) {
   }
 }
 
-/**
- * 다 큰 상어를 놓아주고 **새 종의 아기상어**를 맞이한다.
- *
- * 도감은 그대로 두고 누적만 0 으로 돌린다. 이미 도감에 있는 종은 피해서 고른다 —
- * 다 모으기 전에 같은 종이 또 오면 모으는 일이 운에 맡겨진다.
- */
-export function releaseAndNext(engine, now) {
-  const collected = collect(engine.collected, engine.species)
-  return {
-    ...engine,
-    collected,
-    species: pickSpecies(engine.rng, collected),
-    eaten: 0,
-    lastFedAt: now,
-    pending: 0,
-    food: [],
-  }
-}
-
 /** 그리는 쪽이 알고 싶어 하는 것만 모아 준다. */
 export function snapshot(engine) {
-  const stage = stageOf(engine.eaten)
+  const stage = shownStage(engine)
   return {
     stage,
-    eaten: engine.eaten,
+    /** 지금 종을 키운 점수. 화면의 눈금이 쓴다. */
+    grown: grownOf(engine),
+    /** 그 종에서 도달한 최고 단계. 여기까지 되돌아갈 수 있다. */
+    reached: reachedStage(engine),
+    total: engine.total,
+    frozen: engine.frozen,
+    pinnedStage: engine.pinnedStage,
+    unlocked: unlockedSpecies(engine.total, engine.grown),
     hunger: hungerAt(engine.lastFedAt, engine.now),
     state: engine.brain.state,
     alpha: visibility(stage, engine.brain.state, engine.gameMode),
     length: lengthNow(engine),
     species: engine.species,
-    collected: engine.collected,
     swimmer: engine.swimmer,
     food: engine.food,
     gameMode: engine.gameMode,

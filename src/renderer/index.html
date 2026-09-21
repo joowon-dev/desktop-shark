@@ -38,7 +38,15 @@
       <section id="tab-dex">
         <p class="muted" id="dex-now"></p>
         <div id="dex-list"></div>
-        <button id="release" hidden>다 컸다 — 놓아주고 새 상어 맞이하기</button>
+
+        <div class="row" id="stage-row">
+          <label id="freeze-switch">
+            <input id="frozen" type="checkbox" />
+            <span>이 모습으로 고정</span>
+          </label>
+          <select id="stage-pick" title="보여 줄 단계"></select>
+        </div>
+        <p class="muted" id="dex-hint"></p>
       </section>
 
       <section id="tab-rank" hidden>

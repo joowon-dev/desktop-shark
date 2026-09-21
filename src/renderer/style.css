@@ -214,14 +214,49 @@ body {
   box-shadow: inset 0 0 0 1px rgba(120, 200, 235, 0.3);
 }
 
-#release {
-  width: 100%;
-  margin-top: 4px;
-  padding: 9px 0;
+#stage-row {
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
 }
 
-#release[hidden] {
-  display: none;
+#freeze-switch {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+#freeze-switch input {
+  width: 14px;
+  height: 14px;
+  accent-color: rgb(90, 190, 230);
+  cursor: pointer;
+}
+
+#stage-pick {
+  padding: 5px 8px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+}
+
+/* 아직 안 열린 종은 눌러도 안 바뀐다. */
+.dex-card.locked {
+  cursor: default;
+}
+
+.dex-card:not(.locked) {
+  cursor: pointer;
+}
+
+#dex-hint {
+  margin-top: 6px;
+  font-size: 11px;
 }
 
 #dex-now {

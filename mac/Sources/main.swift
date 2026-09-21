@@ -31,14 +31,17 @@ private enum Key {
     static let panel = (code: UInt32(kVK_ANSI_R), modifiers: UInt32(optionKey | shiftKey))
 }
 
-private let eatenKey = "eaten"
+private let totalKey = "total"
+private let grownKey = "grown"
+private let frozenKey = "frozen"
+private let pinnedKey = "pinnedStage"
 private let lastFedKey = "lastFedAt"
 private let playerIdKey = "playerId"
 private let secretKey = "playerSecret"
 private let nicknameKey = "nickname"
 private let rankingKey = "rankingOn"
 private let speciesKey = "species"
-private let collectedKey = "collected"
+
 private let screenKey = "screenNumber"
 private let webScheme = "shark"
 
@@ -136,9 +139,31 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
     /// 메뉴바에 적을 것. 렌더러가 밀어 준다.
     private var statusText = "1단계 · 배부름"
 
-    private var eaten: Int {
-        get { UserDefaults.standard.integer(forKey: eatenKey) }
-        set { UserDefaults.standard.set(newValue, forKey: eatenKey) }
+    /// 전체 누적. 종을 여는 데 쓴다.
+    private var total: Int {
+        get { UserDefaults.standard.integer(forKey: totalKey) }
+        set { UserDefaults.standard.set(newValue, forKey: totalKey) }
+    }
+    /// 종마다 따로 키운 점수. { "white": 1200, ... }
+    ///
+    /// **숫자가 아닌 값이 섞여 있어도 그것만 버린다.** `as? [String: Int]` 로 통째로
+    /// 받으면 값 하나가 문자열이기만 해도 사전 전체가 nil 이 되어 키운 것이 다 날아간다.
+    private var grown: [String: Int] {
+        get {
+            let raw = UserDefaults.standard.dictionary(forKey: grownKey) ?? [:]
+            return raw.compactMapValues { ($0 as? NSNumber)?.intValue }
+        }
+        set { UserDefaults.standard.set(newValue, forKey: grownKey) }
+    }
+    /// 지금 종의 성장을 멈췄는가.
+    private var frozen: Bool {
+        get { UserDefaults.standard.bool(forKey: frozenKey) }
+        set { UserDefaults.standard.set(newValue, forKey: frozenKey) }
+    }
+    /// 보여 줄 단계를 못 박았는가. 0 이면 「자동」.
+    private var pinnedStage: Int {
+        get { UserDefaults.standard.integer(forKey: pinnedKey) }
+        set { UserDefaults.standard.set(newValue, forKey: pinnedKey) }
     }
     /// 마지막으로 먹인 시각 (ms). 0 이면 「한 번도 안 먹였다」.
     private var lastFedAt: Double {
@@ -162,12 +187,6 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
         get { UserDefaults.standard.string(forKey: speciesKey) ?? "white" }
         set { UserDefaults.standard.set(newValue, forKey: speciesKey) }
     }
-    /// 도감 — 6단계까지 키워 본 종들.
-    private var collected: [String] {
-        get { UserDefaults.standard.stringArray(forKey: collectedKey) ?? [] }
-        set { UserDefaults.standard.set(newValue, forKey: collectedKey) }
-    }
-
     /// 랭킹에 올릴 것인가. **밥 주기와 달리 이건 저장한다** — 「안 올린다」는 설정이다.
     /// 등록된 적이 없으면 기본은 켜짐.
     private var rankingOn: Bool {
@@ -227,18 +246,19 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
     /// 통째로 깨지고 — 이건 문서 시작에 주입되므로 — window.sneaky 가 아예 안 만들어져
     /// 게임이 「브리지 없음」으로 조용히 떨어진다. 에러도 안 나고 핫키만 죽는다.
     private func stateJSON() -> String {
-        var payload: [String: Any] = ["eaten": eaten]
+        var payload: [String: Any] = ["total": total, "grown": grown, "frozen": frozen]
+        payload["pinnedStage"] = pinnedStage > 0 ? pinnedStage : NSNull()
         payload["lastFedAt"] = lastFedAt > 0 ? lastFedAt : NSNull()
         payload["playerId"] = playerId ?? NSNull()
         payload["secret"] = secret ?? NSNull()
         payload["nickname"] = nickname ?? NSNull()
         payload["ranking"] = rankingOn
         payload["species"] = species
-        payload["collected"] = collected
+
 
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
               let json = String(data: data, encoding: .utf8) else {
-            return "{ eaten: 0, lastFedAt: null }"
+            return "{ total: 0, grown: {}, lastFedAt: null }"
         }
         return json
     }
@@ -248,7 +268,7 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
         window.sneaky = {
           getState: () => Promise.resolve(\(stateJSON())),
           saveState: (s) => window.webkit.messageHandlers.shark.postMessage({
-            type: 'state', eaten: s && s.eaten, lastFedAt: s && s.lastFedAt,
+            type: 'state', total: s && s.total, lastFedAt: s && s.lastFedAt,
           }),
           saveAccount: (a) => window.webkit.messageHandlers.shark.postMessage({
             type: 'account', playerId: a && a.playerId, secret: a && a.secret, nickname: a && a.nickname,
@@ -268,7 +288,8 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
           grabKeyboard: () => window.webkit.messageHandlers.shark.postMessage({ type: 'grabKeyboard' }),
           releaseKeyboard: () => window.webkit.messageHandlers.shark.postMessage({ type: 'releaseKeyboard' }),
           saveDex: (d) => window.webkit.messageHandlers.shark.postMessage({
-            type: 'dex', species: d && d.species, collected: d && d.collected,
+            type: 'dex', species: d && d.species, grown: d && d.grown,
+            frozen: !!(d && d.frozen), pinnedStage: (d && d.pinnedStage) || 0,
           }),
           setPanelRect: (r) => window.webkit.messageHandlers.shark.postMessage({
             type: 'panelRect',
@@ -353,7 +374,7 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
         let alert = NSAlert()
         alert.messageText = "상어를 놓아줄까요?"
         alert.informativeText = """
-        이 기기에서 키운 기록과 **도감**이 사라지고 아기 백상아리부터 다시 시작합니다.
+        이 기기에서 키운 기록과 **열어 둔 종**이 사라지고 아기 백상아리부터 다시 시작합니다.
         랭킹 기록은 서버에 남고, 복구 코드를 다시 넣으면 돌아옵니다.
         """
         alert.addButton(withTitle: "놓아주기")
@@ -363,10 +384,12 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
         NSApp.activate(ignoringOtherApps: true)
         guard alert.runModal() == .alertFirstButtonReturn else { return }
 
-        eaten = 0
+        total = 0
+        grown = [:]
+        frozen = false
+        pinnedStage = 0
         lastFedAt = 0
         species = "white"
-        collected = []
         webView.reload()
         refreshMenu()
     }
@@ -630,7 +653,7 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
             }
 
         case "state":
-            if let value = body["eaten"] as? Int { eaten = value }
+            if let value = body["total"] as? Int { total = value }
             if let value = body["lastFedAt"] as? Double { lastFedAt = value }
 
         case "account":
@@ -662,7 +685,9 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
 
         case "dex":
             if let value = body["species"] as? String { species = value }
-            if let list = body["collected"] as? [String] { collected = list }
+            if let map = body["grown"] as? [String: Int] { grown = map }
+            frozen = body["frozen"] as? Bool ?? false
+            pinnedStage = body["pinnedStage"] as? Int ?? 0
             refreshMenu()
 
         case "status":

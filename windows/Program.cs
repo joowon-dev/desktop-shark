@@ -234,7 +234,17 @@ sealed class Overlay : Form
     /// <summary>트레이에 적을 것. 렌더러가 밀어 준다.</summary>
     public string StatusText { get; private set; } = "1단계 · 배부름";
 
-    public int Eaten { get; private set; }
+    /// <summary>전체 누적. 종을 여는 데 쓴다.</summary>
+    public int Total { get; private set; }
+
+    /// <summary>종마다 따로 키운 점수.</summary>
+    public Dictionary<string, int> Grown { get; private set; } = new();
+
+    /// <summary>지금 종의 성장을 멈췄는가. 멈춰도 전체 누적은 계속 쌓인다.</summary>
+    public bool Frozen { get; private set; }
+
+    /// <summary>보여 줄 단계를 못 박았는가. 0 이면 「자동」.</summary>
+    public int PinnedStage { get; private set; }
 
     /// <summary>마지막으로 먹인 시각 (ms). 0 이면 「한 번도 안 먹였다」.</summary>
     public double LastFedAt { get; private set; }
@@ -250,9 +260,6 @@ sealed class Overlay : Form
 
     /// <summary>지금 키우는 상어의 종.</summary>
     public string SpeciesKey { get; private set; } = "white";
-
-    /// <summary>도감 — 6단계까지 키워 본 종들.</summary>
-    public List<string> Collected { get; private set; } = new();
 
     /// <summary>별명을 치는 중인가. <b>이때만</b> 키보드를 가져온다.</summary>
     private bool holdingKeyboard;
@@ -495,14 +502,16 @@ sealed class Overlay : Form
     /// </summary>
     private string StateJson() => JsonSerializer.Serialize(new
     {
-        eaten = Eaten,
+        total = Total,
+        grown = Grown,
+        frozen = Frozen,
+        pinnedStage = PinnedStage > 0 ? (int?)PinnedStage : null,
         lastFedAt = LastFedAt > 0 ? (double?)LastFedAt : null,
         playerId = PlayerId,
         secret = Secret,
         nickname = Nickname,
         ranking = RankingOn,
         species = SpeciesKey,
-        collected = Collected,
     });
 
     /// <summary>맥 셸과 <b>같은 모양</b>의 다리. 한쪽만 고치면 두 플랫폼이 다른 게임이 된다.</summary>
@@ -510,7 +519,7 @@ sealed class Overlay : Form
         window.sneaky = {
           getState: () => Promise.resolve({{StateJson()}}),
           saveState: (s) => window.chrome.webview.postMessage({
-            type: 'state', eaten: s && s.eaten, lastFedAt: s && s.lastFedAt,
+            type: 'state', total: s && s.total, lastFedAt: s && s.lastFedAt,
           }),
           saveAccount: (a) => window.chrome.webview.postMessage({
             type: 'account', playerId: a && a.playerId, secret: a && a.secret, nickname: a && a.nickname,
@@ -528,7 +537,8 @@ sealed class Overlay : Form
           grabKeyboard: () => window.chrome.webview.postMessage({ type: 'grabKeyboard' }),
           releaseKeyboard: () => window.chrome.webview.postMessage({ type: 'releaseKeyboard' }),
           saveDex: (d) => window.chrome.webview.postMessage({
-            type: 'dex', species: d && d.species, collected: d && d.collected,
+            type: 'dex', species: d && d.species, grown: d && d.grown,
+            frozen: !!(d && d.frozen), pinnedStage: (d && d.pinnedStage) || 0,
           }),
           setPanelRect: (r) => window.chrome.webview.postMessage({
             type: 'panelRect', x: r ? r.x : -1, y: r ? r.y : -1, w: r ? r.w : 0, h: r ? r.h : 0,
@@ -652,15 +662,17 @@ sealed class Overlay : Form
     public void ResetShark()
     {
         var answer = MessageBox.Show(
-            "이 기기에서 키운 기록과 도감이 사라지고 아기 백상아리부터 다시 시작합니다.\n"
+            "이 기기에서 키운 기록과 열어 둔 종이 사라지고 아기 백상아리부터 다시 시작합니다.\n"
             + "랭킹 기록은 서버에 남고, 복구 코드를 다시 넣으면 돌아옵니다.",
             "상어를 놓아줄까요?", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning);
         if (answer != DialogResult.OK) return;
 
-        Eaten = 0;
+        Total = 0;
+        Grown = new Dictionary<string, int>();
+        Frozen = false;
+        PinnedStage = 0;
         LastFedAt = 0;
         SpeciesKey = "white";
-        Collected = new List<string>();
         WriteState();
         if (ready) web.CoreWebView2.Reload();
         SettingsChanged?.Invoke();
@@ -692,8 +704,8 @@ sealed class Overlay : Form
                     return;
 
                 case "state":
-                    if (body.TryGetProperty("eaten", out var n) && n.ValueKind == JsonValueKind.Number)
-                        Eaten = n.GetInt32();
+                    if (body.TryGetProperty("total", out var n) && n.ValueKind == JsonValueKind.Number)
+                        Total = n.GetInt32();
                     if (body.TryGetProperty("lastFedAt", out var f) && f.ValueKind == JsonValueKind.Number)
                         LastFedAt = f.GetDouble();
                     WriteState();
@@ -743,13 +755,17 @@ sealed class Overlay : Form
 
                 case "dex":
                     SpeciesKey = Str(body, "species") ?? SpeciesKey;
-                    if (body.TryGetProperty("collected", out var dex) && dex.ValueKind == JsonValueKind.Array)
+                    // **숫자가 아닌 값은 그것만 버린다.** 통째로 받으면 값 하나 때문에
+                    // 키운 것이 다 날아간다.
+                    if (body.TryGetProperty("grown", out var g) && g.ValueKind == JsonValueKind.Object)
                     {
-                        Collected = dex.EnumerateArray()
-                            .Where(v => v.ValueKind == JsonValueKind.String)
-                            .Select(v => v.GetString()!)
-                            .ToList();
+                        Grown = g.EnumerateObject()
+                            .Where(v => v.Value.ValueKind == JsonValueKind.Number)
+                            .ToDictionary(v => v.Name, v => v.Value.GetInt32());
                     }
+                    Frozen = body.TryGetProperty("frozen", out var fz) && fz.ValueKind == JsonValueKind.True;
+                    PinnedStage = body.TryGetProperty("pinnedStage", out var ps)
+                        && ps.ValueKind == JsonValueKind.Number ? ps.GetInt32() : 0;
                     WriteState();
                     return;
 
@@ -776,7 +792,14 @@ sealed class Overlay : Form
         try
         {
             var json = JsonDocument.Parse(File.ReadAllText(statePath)).RootElement;
-            Eaten = json.TryGetProperty("eaten", out var n) ? n.GetInt32() : 0;
+            Total = json.TryGetProperty("total", out var n) ? n.GetInt32() : 0;
+            Grown = json.TryGetProperty("grown", out var g) && g.ValueKind == JsonValueKind.Object
+                ? g.EnumerateObject().Where(v => v.Value.ValueKind == JsonValueKind.Number)
+                   .ToDictionary(v => v.Name, v => v.Value.GetInt32())
+                : new Dictionary<string, int>();
+            Frozen = json.TryGetProperty("frozen", out var fz) && fz.ValueKind == JsonValueKind.True;
+            PinnedStage = json.TryGetProperty("pinnedStage", out var ps)
+                && ps.ValueKind == JsonValueKind.Number ? ps.GetInt32() : 0;
             LastFedAt = json.TryGetProperty("lastFedAt", out var f) && f.ValueKind == JsonValueKind.Number
                 ? f.GetDouble() : 0;
             PlayerId = Str(json, "playerId");
@@ -784,15 +807,12 @@ sealed class Overlay : Form
             Nickname = Str(json, "nickname");
             ScreenName = Str(json, "screen");
             SpeciesKey = Str(json, "species") ?? "white";
-            Collected = json.TryGetProperty("collected", out var dex) && dex.ValueKind == JsonValueKind.Array
-                ? dex.EnumerateArray().Where(v => v.ValueKind == JsonValueKind.String)
-                     .Select(v => v.GetString()!).ToList()
-                : new List<string>();
             RankingOn = !json.TryGetProperty("ranking", out var rank) || rank.ValueKind != JsonValueKind.False;
         }
         catch
         {
-            Eaten = 0;
+            Total = 0;
+            Grown = new Dictionary<string, int>();
             LastFedAt = 0;
         }
     }
@@ -804,14 +824,16 @@ sealed class Overlay : Form
             Directory.CreateDirectory(Path.GetDirectoryName(statePath)!);
             File.WriteAllText(statePath, JsonSerializer.Serialize(new
             {
-                eaten = Eaten,
+                total = Total,
+                grown = Grown,
+                frozen = Frozen,
+                pinnedStage = PinnedStage,
                 lastFedAt = LastFedAt,
                 playerId = PlayerId,
                 secret = Secret,
                 nickname = Nickname,
                 ranking = RankingOn,
                 species = SpeciesKey,
-                collected = Collected,
                 screen = ScreenName,
             }));
         }

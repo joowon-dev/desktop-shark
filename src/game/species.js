@@ -7,6 +7,8 @@
 // 값은 전부 손맛이다. 실제 상어의 비율을 재서 넣은 것이 아니라, **작게 줄여도 서로
 // 구별되는가**만 보고 정했다.
 
+import { SPECIES_UNLOCK, STAGE_THRESHOLDS } from './constants.js'
+
 /**
  * @typedef {object} Species
  * @property {string} name  도감에 적는 이름
@@ -65,28 +67,60 @@ export function speciesOf(key) {
   return SPECIES[key] ?? SPECIES[FIRST_SPECIES]
 }
 
+/** 한 종을 다 키운 점수. 다음 종의 자물쇠 하나가 이것이다. */
+export const FULL_GROWN = STAGE_THRESHOLDS[STAGE_THRESHOLDS.length - 1]
+
 /**
- * 다음에 맞이할 종을 고른다.
+ * 지금까지 열린 종들. **자물쇠가 둘이고 순서대로 열린다.**
  *
- * **아직 도감에 없는 종을 먼저 준다.** 다 모으기 전에 같은 종이 또 오면 도감이
- * 채워지지 않고, 그러면 모으는 일이 운에 맡겨진다. 다 모았으면 아무거나 준다.
+ *  1. 앞 종을 **6 단계까지 키웠는가** (그 종을 키운 점수 ≥ FULL_GROWN)
+ *  2. 전체 누적이 문턱을 넘었는가
  *
- * @param {() => number} rng
- * @param {string[]} collected 이미 도감에 있는 종
+ * 점수만으로 열면 한 종도 안 키우고 도감이 채워지고, 성장만으로 열면 하루 만에
+ * 다 열린다. 그리고 **앞 종이 막히면 뒤도 다 막힌다** — 건너뛰기가 없다.
+ *
+ * @param {number} total 전체 누적
+ * @param {Record<string, number>} grown 종마다 키운 점수
  */
-export function pickSpecies(rng, collected = []) {
-  const left = SPECIES_ORDER.filter((key) => !collected.includes(key))
-  const pool = left.length > 0 ? left : SPECIES_ORDER
-  return pool[Math.floor(rng() * pool.length) % pool.length]
+export function unlockedSpecies(total = 0, grown = {}) {
+  const open = [SPECIES_ORDER[0]]
+  for (let i = 1; i < SPECIES_ORDER.length; i += 1) {
+    const previous = SPECIES_ORDER[i - 1]
+    const raised = (grown[previous] ?? 0) >= FULL_GROWN
+    if (!raised || total < SPECIES_UNLOCK[i]) break
+    open.push(SPECIES_ORDER[i])
+  }
+  return open
 }
 
-/** 도감을 다 채웠는가. */
-export function isComplete(collected = []) {
-  return SPECIES_ORDER.every((key) => collected.includes(key))
+/** 그 종이 열렸는가. */
+export function isUnlocked(key, total = 0, grown = {}) {
+  return unlockedSpecies(total, grown).includes(key)
 }
 
-/** 도감에 한 종을 더한다. 중복은 안 넣는다. */
-export function collect(collected, key) {
-  if (!SPECIES_ORDER.includes(key) || collected.includes(key)) return collected
-  return [...collected, key]
+/**
+ * 다음에 열릴 종과 **무엇이 모자란지**. 다 열었으면 null.
+ *
+ * 둘 중 하나만 모자랄 수도 있으므로 둘 다 알려 준다 — 「왜 안 열리지」를 화면에서
+ * 답할 수 있어야 한다.
+ */
+export function nextUnlock(total = 0, grown = {}) {
+  const open = unlockedSpecies(total, grown)
+  if (open.length >= SPECIES_ORDER.length) return null
+
+  const i = open.length
+  const previous = SPECIES_ORDER[i - 1]
+  return {
+    species: SPECIES_ORDER[i],
+    /** 앞 종을 더 키워야 하는 점수. 0 이면 그 자물쇠는 풀렸다. */
+    raise: Math.max(0, FULL_GROWN - (grown[previous] ?? 0)),
+    raiseSpecies: previous,
+    /** 전체 누적이 더 필요한 점수. 0 이면 그 자물쇠는 풀렸다. */
+    score: Math.max(0, SPECIES_UNLOCK[i] - total),
+  }
+}
+
+/** 여섯 종을 다 열었는가. */
+export function isComplete(total = 0, grown = {}) {
+  return unlockedSpecies(total, grown).length >= SPECIES_ORDER.length
 }

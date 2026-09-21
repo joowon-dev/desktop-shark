@@ -5,9 +5,10 @@
 
 import { DT, RIPPLE_REACH, WAKE_LIFE } from '../game/constants.js'
 import {
-  createEngine, feedAt, feedTyped, releaseAndNext, setBounds, setGameMode, snapshot, step,
+  chooseSpecies, createEngine, feedAt, feedTyped, pinStage, setBounds, setFrozen,
+  setGameMode, snapshot, step,
 } from '../game/engine.js'
-import { SPECIES, SPECIES_ORDER, isComplete, speciesOf } from '../game/species.js'
+import { SPECIES, SPECIES_ORDER, isComplete, nextUnlock, speciesOf } from '../game/species.js'
 import { hungerLabel } from '../game/hunger.js'
 import { toNextStage } from '../game/growth.js'
 import {
@@ -107,12 +108,13 @@ function afterStep() {
     saveState()
     flashHud()
 
-    // 방금 6단계에 닿아 도감에 올랐으면 그것도 저장한다.
-    if (engine.collected.length !== collectedCount) {
-      collectedCount = engine.collected.length
-      saveDex()
+    // 종이 자랐거나 새 종이 열렸으면 그것도 저장한다.
+    const open = snapshot(engine).unlocked.length
+    if (open !== unlockedCount) {
+      unlockedCount = open
       if (!panel.hidden) refreshDex()
     }
+    saveDex()
   }
 }
 
@@ -128,17 +130,20 @@ function refreshHud() {
   document.getElementById('hud-stage').textContent = `${snap.stage}단계`
   document.getElementById('hud-hunger').textContent = hungerLabel(snap.hunger)
 
-  const left = toNextStage(snap.eaten)
-  document.getElementById('hud-next').textContent =
-    left === null ? '다 컸다' : `다음까지 ${left}점`
+  const left = snap.frozen ? null : toNextStage(snap.grown)
+  document.getElementById('hud-next').textContent = snap.frozen
+    ? '고정됨'
+    : (left === null ? '다 컸다' : `다음까지 ${left.toLocaleString()}점`)
 
-  bridge?.setStatus?.({ stage: snap.stage, hunger: hungerLabel(snap.hunger), eaten: snap.eaten })
+  bridge?.setStatus?.({
+    stage: snap.stage, hunger: hungerLabel(snap.hunger), eaten: snap.total,
+  })
 }
 
 // MARK: 저장
 
 function saveState() {
-  bridge?.saveState?.({ eaten: engine.eaten, lastFedAt: engine.lastFedAt })
+  bridge?.saveState?.({ total: engine.total, lastFedAt: engine.lastFedAt })
 }
 
 // MARK: 밥 주기
@@ -179,7 +184,7 @@ if (!bridge) {
  * 된다. 방금 무슨 일이 일어났는지만 알려 주고 사라지는 편이 낫다.
  */
 let hudTimer = null
-let collectedCount = 0
+let unlockedCount = 1
 
 function flashHud() {
   refreshHud()
@@ -236,17 +241,17 @@ function applyRanking(on, save) {
 
 // MARK: 도감
 
-/** 도감을 다시 그린다. 지금 키우는 종은 테두리가 돈다. */
+/** 도감을 다시 그린다. 지금 데리고 있는 종은 테두리가 돈다. */
 function refreshDex() {
   const snap = snapshot(engine)
   const list = document.getElementById('dex-list')
   list.innerHTML = ''
 
   for (const key of SPECIES_ORDER) {
-    const known = snap.collected.includes(key) || key === snap.species
+    const open = snap.unlocked.includes(key)
     const card = document.createElement('div')
-    card.className = `dex-card${known ? '' : ' locked'}${key === snap.species ? ' now' : ''}`
-    card.title = known ? SPECIES[key].hint : '아직 만나지 않았습니다'
+    card.className = `dex-card${open ? '' : ' locked'}${key === snap.species ? ' now' : ''}`
+    card.title = open ? `${SPECIES[key].hint} — 눌러서 데려오기` : '아직 열리지 않았습니다'
 
     const canvas = document.createElement('canvas')
     const dpr = window.devicePixelRatio || 1
@@ -259,40 +264,94 @@ function refreshDex() {
     c.translate(w / 2, h / 2)
     c.scale(w * 0.82, w * 0.82)
     // **화면의 상어와 같은 함수로 그린다.** 다르면 도감이 아니다.
-    drawSharkBody(c, key, 6, known ? 0.9 : 0.34, 0, 0, w * 0.82, { ink: RIM, rim: false })
+    // 열린 종은 **키운 만큼의 모습**으로 보여 준다 — 도감이 곧 내 상어들의 목록이다.
+    const stage = open ? Math.max(1, snapshot({ ...engine, species: key, pinnedStage: null }).stage) : 6
+    drawSharkBody(c, key, stage, open ? 0.9 : 0.3, 0, 0, w * 0.82, { ink: RIM, rim: false })
     card.appendChild(canvas)
 
     const label = document.createElement('div')
     label.className = 'label'
-    label.textContent = known ? SPECIES[key].name : '???'
+    label.textContent = open ? SPECIES[key].name : '???'
     card.appendChild(label)
+
+    // **눌러서 데려온다.** 이미 키운 종으로 언제든 돌아갈 수 있다.
+    if (open) {
+      card.addEventListener('click', () => {
+        engine = chooseSpecies(engine, key)
+        saveDex()
+        refreshDex()
+        flashHud()
+      })
+    }
 
     list.appendChild(card)
   }
 
-  const now = speciesOf(snap.species)
-  const done = snap.collected.length
-  document.getElementById('dex-now').textContent = isComplete(snap.collected)
-    ? `도감을 다 채웠습니다. 지금은 ${now.name} 을 키웁니다.`
-    : `${done} / ${SPECIES_ORDER.length} — 지금은 ${now.name}, ${snap.stage}단계`
+  refreshStageControls(snap)
 
-  // 다 키운 상어만 놓아줄 수 있다.
-  document.getElementById('release').hidden = snap.stage < 6
+  const now = speciesOf(snap.species)
+  const next = nextUnlock(snap.total, engine.grown)
+  document.getElementById('dex-now').textContent = next === null
+    ? `여섯 종을 다 열었습니다. 지금은 ${now.name}, ${snap.stage}단계`
+    : `${snap.unlocked.length} / ${SPECIES_ORDER.length} 열림 — 지금은 ${now.name}, ${snap.stage}단계`
+
+  // **무엇이 모자란지** 말해 준다. 자물쇠가 둘이라 「왜 안 열리지」가 생긴다.
+  const hint = document.getElementById('dex-hint')
+  if (next === null) {
+    hint.textContent = '다 모았습니다. 마음에 드는 상어를 데리고 사세요.'
+  } else {
+    const parts = []
+    if (next.raise > 0) {
+      parts.push(`${SPECIES[next.raiseSpecies].name}를 ${next.raise.toLocaleString()}점 더 키우고`)
+    }
+    if (next.score > 0) parts.push(`전체 ${next.score.toLocaleString()}점 더 모으면`)
+    if (parts.length === 0) parts.push('곧')
+    hint.textContent = `${parts.join(' ')} ${SPECIES[next.species].name}가 열립니다`
+  }
 }
 
-document.getElementById('release').addEventListener('click', () => {
-  const before = speciesOf(engine.species).name
-  engine = releaseAndNext(engine, Date.now())
-  saveState()
+/** 「고정」과 「보여 줄 단계」. 지나온 단계까지만 고를 수 있다. */
+function refreshStageControls(snap) {
+  document.getElementById('frozen').checked = snap.frozen
+
+  const pick = document.getElementById('stage-pick')
+  pick.innerHTML = ''
+  const auto = document.createElement('option')
+  auto.value = ''
+  auto.textContent = `자동 (${snap.reached}단계)`
+  pick.appendChild(auto)
+
+  for (let stage = 1; stage <= snap.reached; stage += 1) {
+    const option = document.createElement('option')
+    option.value = String(stage)
+    option.textContent = `${stage}단계로 보기`
+    pick.appendChild(option)
+  }
+  pick.value = snap.pinnedStage == null ? '' : String(snap.pinnedStage)
+  // 1단계뿐이면 고를 것이 없다.
+  pick.disabled = snap.reached <= 1
+}
+
+document.getElementById('frozen').addEventListener('change', (event) => {
+  engine = setFrozen(engine, event.target.checked)
+  saveDex()
+  refreshDex()
+})
+
+document.getElementById('stage-pick').addEventListener('change', (event) => {
+  engine = pinStage(engine, event.target.value === '' ? null : Number(event.target.value))
   saveDex()
   refreshDex()
   flashHud()
-  document.getElementById('dex-now').textContent =
-    `${before} 을 놓아주었습니다. ${speciesOf(engine.species).name} 아기상어가 왔습니다.`
 })
 
 function saveDex() {
-  bridge?.saveDex?.({ species: engine.species, collected: engine.collected })
+  bridge?.saveDex?.({
+    species: engine.species,
+    grown: engine.grown,
+    frozen: engine.frozen,
+    pinnedStage: engine.pinnedStage,
+  })
 }
 
 // MARK: 탭
@@ -317,7 +376,18 @@ for (const tab of document.querySelectorAll('.tab')) {
 
 let lastRect = null
 
-function reportPanelRect() {
+/** 끌고 있는 동안인가. 이때는 네모를 크게 잡아 커서가 조금 벗어나도 안 끊긴다. */
+let dragging = false
+
+/**
+ * 끌 때 네모를 이만큼 넓혀서 알린다(CSS 픽셀).
+ *
+ * **끌면 창이 마우스를 놓친다.** 커서가 패널을 아주 조금만 앞질러도 셸이 「밖이다」로
+ * 보고 클릭을 밑으로 흘려보내서 드래그가 그 자리에서 끊긴다. 끄는 동안만 넉넉히 잡는다.
+ */
+const DRAG_SLACK = 220
+
+function reportPanelRect(force = false) {
   if (panel.hidden) {
     if (lastRect !== null) {
       lastRect = null
@@ -327,8 +397,14 @@ function reportPanelRect() {
   }
 
   const box = panel.getBoundingClientRect()
-  const next = { x: box.left, y: box.top, w: box.width, h: box.height }
-  const same = lastRect
+  const slack = dragging ? DRAG_SLACK : 0
+  const next = {
+    x: box.left - slack,
+    y: box.top - slack,
+    w: box.width + slack * 2,
+    h: box.height + slack * 2,
+  }
+  const same = !force && lastRect
     && Math.abs(lastRect.x - next.x) < 0.5 && Math.abs(lastRect.y - next.y) < 0.5
     && Math.abs(lastRect.w - next.w) < 0.5 && Math.abs(lastRect.h - next.h) < 0.5
   if (same) return
@@ -344,28 +420,35 @@ function reportPanelRect() {
 
 ;(() => {
   const grip = document.getElementById('grip')
-  let dragging = null
+  let held = null
 
   grip.addEventListener('pointerdown', (event) => {
     if (event.target.id === 'close-panel') return
     const box = panel.getBoundingClientRect()
-    dragging = { dx: event.clientX - box.left, dy: event.clientY - box.top }
+    held = { dx: event.clientX - box.left, dy: event.clientY - box.top }
+    dragging = true
+    // 셸에 곧장 알린다 — 다음 프레임을 기다리면 그 사이에 끊긴다.
+    reportPanelRect(true)
     grip.setPointerCapture(event.pointerId)
   })
 
   grip.addEventListener('pointermove', (event) => {
-    if (!dragging) return
+    if (!held) return
     const box = panel.getBoundingClientRect()
     // 화면 밖으로 끌어내지 못하게 막는다. 한 번 나가면 잡을 데가 없다.
-    const x = Math.max(0, Math.min(window.innerWidth - box.width, event.clientX - dragging.dx))
-    const y = Math.max(0, Math.min(window.innerHeight - box.height, event.clientY - dragging.dy))
+    const x = Math.max(0, Math.min(window.innerWidth - box.width, event.clientX - held.dx))
+    const y = Math.max(0, Math.min(window.innerHeight - box.height, event.clientY - held.dy))
     panel.style.left = `${x}px`
     panel.style.top = `${y}px`
     panel.style.transform = 'none'
   })
 
   for (const type of ['pointerup', 'pointercancel']) {
-    grip.addEventListener(type, () => { dragging = null })
+    grip.addEventListener(type, () => {
+      held = null
+      dragging = false
+      reportPanelRect(true)
+    })
   }
 })()
 
@@ -435,9 +518,9 @@ async function flush() {
 
     // 서버가 매긴 누적치. 오프라인에서 키운 것을 잃지 않으려고 큰 쪽을 쓴다.
     const server = Array.isArray(rows) ? rows[0]?.eaten : rows?.eaten
-    const merged = mergeEaten(engine.eaten, server)
-    if (merged !== engine.eaten) {
-      engine = { ...engine, eaten: merged }
+    const merged = mergeEaten(engine.total, server)
+    if (merged !== engine.total) {
+      engine = { ...engine, total: merged }
       saveState()
       refreshHud()
     }
@@ -581,7 +664,7 @@ document.getElementById('use-code').addEventListener('click', async () => {
     // 이 계정의 상어를 받아 온다. 이 기기에서 키운 것과 큰 쪽을 쓴다.
     const rows = await myShark(parsed.playerId)
     const me = Array.isArray(rows) ? rows[0] : rows
-    engine = { ...engine, eaten: mergeEaten(engine.eaten, me?.eaten) }
+    engine = { ...engine, total: mergeEaten(engine.total, me?.eaten) }
 
     bridge?.saveAccount?.(account)
     saveState()
@@ -600,15 +683,17 @@ async function start() {
 
   const saved = (await bridge?.getState?.()) ?? {}
   engine = createEngine({
-    eaten: saved.eaten ?? 0,
-    lastFedAt: saved.lastFedAt ?? null,
+    total: saved.total ?? 0,
+    grown: saved.grown ?? {},
     species: saved.species,
-    collected: saved.collected ?? [],
+    frozen: saved.frozen ?? false,
+    pinnedStage: saved.pinnedStage ?? null,
+    lastFedAt: saved.lastFedAt ?? null,
     seed: (Date.now() & 0xffff) | 1,
     bounds: engine.bounds,
     now: Date.now(),
   })
-  collectedCount = engine.collected.length
+  unlockedCount = snapshot(engine).unlocked.length
 
   if (saved.ranking === false) applyRanking(false, false)
 
@@ -618,9 +703,9 @@ async function start() {
     myShark(account.playerId)
       .then((rows) => {
         const me = Array.isArray(rows) ? rows[0] : rows
-        const merged = mergeEaten(engine.eaten, me?.eaten)
-        if (merged !== engine.eaten) {
-          engine = { ...engine, eaten: merged }
+        const merged = mergeEaten(engine.total, me?.eaten)
+        if (merged !== engine.total) {
+          engine = { ...engine, total: merged }
           saveState()
           refreshHud()
         }

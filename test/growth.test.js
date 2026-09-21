@@ -7,26 +7,26 @@ import { baseAlphaOf, detailOf, lengthOf, stageOf, toNextStage, visibility } fro
 
 describe('단계 문턱', () => {
   it('값을 못 박는다 — 서버의 shark_stage 와 같아야 한다', () => {
-    expect(STAGE_THRESHOLDS).toEqual([0, 30, 100, 250, 550, 1000])
+    expect(STAGE_THRESHOLDS).toEqual([0, 700, 2200, 5500, 10500, 18000])
   })
 
   it.each([
-    [0, 1], [29, 1],
-    [30, 2], [99, 2],
-    [100, 3], [249, 3],
-    [250, 4], [549, 4],
-    [550, 5], [999, 5],
-    [1000, 6], [99999, 6],
-  ])('%i 점이면 %i단계', (eaten, stage) => {
-    expect(stageOf(eaten)).toBe(stage)
+    [0, 1], [699, 1],
+    [700, 2], [2199, 2],
+    [2200, 3], [5499, 3],
+    [5500, 4], [10499, 4],
+    [10500, 5], [17999, 5],
+    [18000, 6], [999999, 6],
+  ])('%i 점이면 %i단계', (grown, stage) => {
+    expect(stageOf(grown)).toBe(stage)
   })
 
   it('다음 단계까지 남은 점수를 센다', () => {
-    expect(toNextStage(0)).toBe(30)
-    expect(toNextStage(29)).toBe(1)
-    expect(toNextStage(30)).toBe(70)
+    expect(toNextStage(0)).toBe(700)
+    expect(toNextStage(699)).toBe(1)
+    expect(toNextStage(700)).toBe(1500)
     // 다 큰 상어는 0 이 아니라 null 이다 — 「1 점 남았다」와 「다 컸다」는 다른 말이다.
-    expect(toNextStage(1000)).toBe(null)
+    expect(toNextStage(18000)).toBe(null)
   })
 })
 
