@@ -519,7 +519,11 @@ RLS 를 켜고 **정책을 하나도 만들지 않았다** — 익명 키로는 
   줄의 `key=` 를 볼 것.
 - **맥은 어떤 권한도 필요 없다.** 예전에 필요했던 손쉬운 사용은 카운터 방식으로 바꾸며
   없앴다. 다시 `addGlobalMonitorForEvents` 로 돌아가지 말 것.
-- **리모트는 `joowon-dev/desktop-shark`.** 태그를 밀어야 릴리스가 만들어진다.
+- **리모트는 `joowon-dev/desktop-shark`.** CI 는 PR #1 에서 한 번 통과했다 —
+  맥 zip·dmg 와 윈도우 zip·설치본이 다 만들어진다. **태그는 아직 한 번도 안 밀었다**
+  (`publish` 잡은 태그일 때만 돈다). 첫 릴리스는 `git tag v1.0.0 && git push origin v1.0.0`.
+  **새 저장소는 첫 push 만으로 워크플로가 등록되지 않는다** — 이벤트가 한 번 일어나야
+  한다(PR 이 제일 싸다). 그전까지 `gh workflow run` 은 404 다.
 - **맥 배포본은 공증이 필요하다** — `./mac/notarize.sh`(키체인 프로파일 `webswing-notary`).
   `build.sh` 산출물은 임시 서명이라 Gatekeeper 가 막는다. **이 앱에서는 아직 한 번도 안 돌렸다.**
   CI 가 만드는 맥 산출물도 임시 서명이라 **배포에 쓰면 안 된다**(인증서가 CI 에 없다).
