@@ -14,6 +14,8 @@
 //      (WH_MOUSE_LL / WH_KEYBOARD_LL)으로 클릭과 타자를 **구경만** 한다 — 누르던
 //      버튼은 그대로 눌리고 치던 글자는 그대로 찍힌다. 패널을 열 때만 잠깐 받는다.
 
+using System.Diagnostics;
+using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
@@ -68,6 +70,16 @@ sealed class OverlayContext : ApplicationContext
 
         menu.Items.Add(new ToolStripMenuItem(overlay.StatusText) { Enabled = false });
         menu.Items.Add(new ToolStripSeparator());
+
+        // 1단계 — 새 버전이 있을 때만 낸다. 없으면 메뉴에 아무 흔적도 없다.
+        if (overlay.UpdateVersion is not null)
+        {
+            menu.Items.Add(new ToolStripMenuItem(
+                overlay.UpdateNote ?? $"새 버전 {overlay.UpdateVersion} 설치",
+                null, (_, _) => overlay.InstallUpdate())
+            { Enabled = !overlay.Updating });
+            menu.Items.Add(new ToolStripSeparator());
+        }
 
         menu.Items.Add(new ToolStripMenuItem(
             overlay.GameMode ? "밥 주기 멈추기  Alt+Shift+S" : "밥 주기 다시  Alt+Shift+S",
@@ -299,6 +311,13 @@ sealed class Overlay : Form
         // 맥 셸은 didChangeScreenParametersNotification 으로 모니터·해상도 변경을 받는다.
         SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
 
+        // 켠 지 20초 뒤에 한 번, 그 뒤로는 하루 한 번.
+        var firstCheck = new System.Windows.Forms.Timer { Interval = 20_000 };
+        firstCheck.Tick += (_, _) => { firstCheck.Stop(); _ = CheckForUpdateAsync(); };
+        firstCheck.Start();
+        updateTimer.Tick += (_, _) => _ = CheckForUpdateAsync();
+        updateTimer.Start();
+
         _ = InitWebAsync();
     }
 
@@ -306,6 +325,149 @@ sealed class Overlay : Form
     {
         Bounds = ChosenScreen().WorkingArea;
         SettingsChanged?.Invoke();
+    }
+
+    // MARK: 업데이트
+    //
+    // <b>두 단계로 나눠 뒀다.</b> 1단계는 「새 버전이 있다」고 알리는 것뿐이고,
+    // 2단계는 눌렀을 때 설치본을 받아 조용히 다시 까는 것이다. 눌러야만 깐다 —
+    // 켜 두고 사는 앱이 혼자 다시 뜨면 상어가 사라진 것처럼 보인다.
+    //
+    // 키우던 상어는 state.json 에 있어서 다시 깔아도 그대로다. 설치본이 덮어쓰는 것은
+    // 프로그램 폴더뿐이다.
+
+    private const string ReleaseApi = "https://api.github.com/repos/joowon-dev/desktop-shark/releases/latest";
+    private const string ReleasePage = "https://github.com/joowon-dev/desktop-shark/releases/latest";
+    /// <summary>자동 업데이트가 받아 가는 것은 설치본이다 — zip 은 사람이 직접 풀 때 쓴다.</summary>
+    private const string WinAssetSuffix = "-win-Setup.exe";
+
+    private static readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(20) };
+    private readonly System.Windows.Forms.Timer updateTimer = new() { Interval = 24 * 60 * 60 * 1000 };
+
+    public string? UpdateVersion { get; private set; }
+    public string? UpdateNote { get; private set; }
+    public bool Updating { get; private set; }
+    private string? updateAsset;
+
+    private static string CurrentVersion =>
+        System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
+
+    /// <summary>"v1.10.0" 이 "1.9.0" 보다 높다. 문자열로 비교하면 거꾸로 나온다.</summary>
+    public static bool IsNewerVersion(string candidate, string current)
+    {
+        static int[] Parts(string text) => text.TrimStart('v', 'V', ' ')
+            .Split('.')
+            .Select(p => int.TryParse(new string(p.TakeWhile(char.IsDigit).ToArray()), out var n) ? n : 0)
+            .ToArray();
+
+        var a = Parts(candidate);
+        var b = Parts(current);
+        for (var i = 0; i < Math.Max(a.Length, b.Length); i += 1)
+        {
+            var x = i < a.Length ? a[i] : 0;
+            var y = i < b.Length ? b[i] : 0;
+            if (x != y) return x > y;
+        }
+        return false;
+    }
+
+    /// <summary>하루 한 번 물어본다. 실패는 조용히 삼킨다.</summary>
+    private async Task CheckForUpdateAsync()
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, ReleaseApi);
+            request.Headers.Add("Accept", "application/vnd.github+json");
+            // GitHub 은 User-Agent 없는 요청을 거절한다.
+            request.Headers.Add("User-Agent", "DesktopShark");
+
+            using var response = await http.SendAsync(request);
+            if (!response.IsSuccessStatusCode) return;
+
+            var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+            var tag = json.GetProperty("tag_name").GetString();
+            if (tag is null || !IsNewerVersion(tag, CurrentVersion)) return;
+
+            string? asset = null;
+            if (json.TryGetProperty("assets", out var assets))
+            {
+                foreach (var a in assets.EnumerateArray())
+                {
+                    var name = a.TryGetProperty("name", out var n) ? n.GetString() : null;
+                    if (name is not null && name.EndsWith(WinAssetSuffix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        asset = a.GetProperty("browser_download_url").GetString();
+                        break;
+                    }
+                }
+            }
+
+            BeginInvoke(() =>
+            {
+                UpdateVersion = tag;
+                updateAsset = asset;
+                SettingsChanged?.Invoke();
+            });
+        }
+        catch
+        {
+            // 새 버전을 못 찾는 것과 상어가 안 도는 것은 다른 일이다.
+        }
+    }
+
+    /// <summary>2단계 — 받아서 조용히 다시 깐다. 한 걸음이라도 어긋나면 릴리스 페이지를 연다.</summary>
+    public async void InstallUpdate()
+    {
+        if (Updating) return;
+        if (updateAsset is null)
+        {
+            OpenReleasePage();
+            return;
+        }
+
+        Updating = true;
+        UpdateNote = "내려받는 중…";
+        SettingsChanged?.Invoke();
+
+        var path = Path.Combine(Path.GetTempPath(), $"DesktopShark-{Guid.NewGuid():N}.exe");
+        try
+        {
+            using (var request = new HttpRequestMessage(HttpMethod.Get, updateAsset))
+            {
+                request.Headers.Add("User-Agent", "DesktopShark");
+                using var response = await http.SendAsync(request);
+                response.EnsureSuccessStatusCode();
+                await using var file = File.Create(path);
+                await response.Content.CopyToAsync(file);
+            }
+
+            UpdateNote = "설치하는 중…";
+            SettingsChanged?.Invoke();
+
+            // 조용히 깔고, 돌던 앱을 닫았다가 새것으로 다시 띄운다(installer.iss 가 그렇게 돼 있다).
+            Process.Start(new ProcessStartInfo(path)
+            {
+                Arguments = "/SILENT /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS /NORESTART",
+                UseShellExecute = true,
+            });
+            Application.Exit();
+        }
+        catch
+        {
+            Updating = false;
+            UpdateNote = "직접 받기";
+            SettingsChanged?.Invoke();
+            OpenReleasePage();
+        }
+    }
+
+    private static void OpenReleasePage()
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(ReleasePage) { UseShellExecute = true });
+        }
+        catch { }
     }
 
     // MARK: 투명과 클릭

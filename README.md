@@ -87,8 +87,15 @@ npm start          # 빌드 → 실행 (맥)
 npm test
 npm run build:mac
 npm run build:win
+npm run dmg        # 맥 설치용 dmg
 ```
 
 맥은 Swift + WKWebView, 윈도우는 .NET + WebView2. 크로미움을 담지 않아 앱이 0.4MB 다.
+
+## 받기
+
+[릴리스](https://github.com/joowon-dev/desktop-shark/releases/latest) 에 맥 `dmg` 와
+윈도우 설치본이 올라간다. 깔고 나면 **앱이 하루 한 번 새 버전을 물어보고**, 있으면
+메뉴에 「새 버전 설치」가 뜬다 — 눌러야만 갈아 낀다. 키우던 상어는 그대로다.
 
 자세한 것은 `CLAUDE.md`, 설계는 `docs/superpowers/specs/` 에 있다.

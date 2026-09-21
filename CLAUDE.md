@@ -19,7 +19,11 @@ npm run icons      # build/icon.png · build/tray.png · windows/icon.ico 를 �
 
 npm run build:mac  # dist/DesktopShark-mac.zip (임시 서명 — 남에게 주면 막힌다)
 npm run build:win  # dist/DesktopShark-win-x64.zip (맥에서도 빌드된다)
+npm run dmg        # dist/DesktopShark-mac.dmg (임시 서명. 배포용 아님)
+./mac/notarize.sh  # 서명 → 공증 → 스테이플. zip 과 dmg 를 **따로** 한다 (배포용은 이것)
 ```
+윈도우 설치본은 `iscc /DAppVersion=1.0.0 windows/installer.iss` (Inno Setup 6, 윈도우에서만).
+태그를 밀면 `.github/workflows/release.yml` 가 넷을 다 만들어 릴리스에 붙인다.
 
 조작:
 
@@ -482,6 +486,29 @@ RLS 를 켜고 **정책을 하나도 만들지 않았다** — 익명 키로는 
 브라우저로 볼 때는 ES 모듈이라 `python3 -m http.server` 로 띄워서 연다. 셸이 없으면
 저장도 핫키도 없이 게임만 돈다(`window.sneaky` 가 없으면 조용히 그 길로 간다).
 
+## 배포와 자동 업데이트
+
+**야구와 같은 방식이다.** 태그(`v*`)를 밀면 CI 가 맥 zip·dmg 와 윈도우 zip·설치본을
+만들어 릴리스(`joowon-dev/desktop-shark`)에 붙이고, 앱이 그 릴리스를 물어본다.
+
+- **켠 지 20초 뒤 한 번, 그 뒤로 하루 한 번** GitHub Releases API 에 물어본다.
+  **두 단계이고, 눌러야만 갈아 낀다** — 켜 두고 사는 앱이 혼자 다시 뜨면 상어가 사라진
+  것처럼 보인다. 1단계는 트레이에 「새 버전 v1.0.1 설치」를 내는 것뿐이고(없으면 메뉴에
+  아무 흔적도 없다), 2단계가 받아서 갈아 끼우는 것이다.
+- **맥은 zip, 윈도우는 설치본을 받는다.** dmg 를 마운트해 자기를 갈아 끼우면 실패할
+  자리가 너무 많고, 윈도우는 설치본이 `/SILENT` 로 돌던 앱을 닫았다 다시 띄워 준다
+  (`CloseApplications` · `RestartApplications`). dmg 는 **사람이 처음 받을 때** 쓰는 것이다.
+- **맥은 `spctl` 로 서명을 검사하고, 거절되면 아무것도 건드리지 않고 릴리스 페이지만 연다.**
+  남의 zip 을 받아 자기 자리에 넣는 일은 절대 없어야 한다. 번들 ID 도 같이 본다.
+- **키우던 상어는 업데이트를 타지 않는다.** 맥은 UserDefaults, 윈도우는 `state.json` 에
+  있고, 갈아 끼우는 것은 번들·프로그램 폴더뿐이다.
+- 버전은 **숫자로** 비교한다 — 문자열로 비교하면 1.10 이 1.9 보다 작다.
+- **버전은 세 군데에 적혀 있다**(`package.json` · `mac/Info.plist` · `windows/DesktopShark.csproj`).
+  하나만 낮으면 그 셸만 매일 「새 버전이 있다」고 하고, 갈아 끼워도 또 그런다.
+  `test/release.test.js` 가 셋을 묶어 두고, 자산 이름(`-mac.zip` · `-win-Setup.exe`)이
+  셸·CI·설치본 사이에서 어긋나는 것도 같이 잡는다 — **여긴 어긋나도 에러가 안 난다.**
+  조용히 「알림이 영영 안 뜨는 앱」이 될 뿐이라 테스트로 묶어 두는 것 말고 방법이 없다.
+
 ## 지금 열려 있는 것
 
 - **윈도우는 컴파일만 됐고 실행은 한 번도 안 해 봤다.** 확인할 것: ① 오버레이가
@@ -492,7 +519,11 @@ RLS 를 켜고 **정책을 하나도 만들지 않았다** — 익명 키로는 
   줄의 `key=` 를 볼 것.
 - **맥은 어떤 권한도 필요 없다.** 예전에 필요했던 손쉬운 사용은 카운터 방식으로 바꾸며
   없앴다. 다시 `addGlobalMonitorForEvents` 로 돌아가지 말 것.
-- **리모트가 없다.** `master` 브랜치 하나뿐이다.
+- **리모트는 `joowon-dev/desktop-shark`.** 태그를 밀어야 릴리스가 만들어진다.
 - **맥 배포본은 공증이 필요하다** — `./mac/notarize.sh`(키체인 프로파일 `webswing-notary`).
   `build.sh` 산출물은 임시 서명이라 Gatekeeper 가 막는다. **이 앱에서는 아직 한 번도 안 돌렸다.**
+  CI 가 만드는 맥 산출물도 임시 서명이라 **배포에 쓰면 안 된다**(인증서가 CI 에 없다).
+  릴리스가 만들어지면 맥 zip·dmg 를 공증본으로 **덮어써야** 한다
+  (`gh release upload v… --clobber`). 이걸 빼면 받는 사람이 앱을 못 열고, 자동 업데이트도
+  `spctl` 에서 걸려 페이지만 열린다.
 - 소리, 여러 마리, 수족관은 첫 판에 넣지 않았다.

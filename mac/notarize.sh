@@ -16,6 +16,9 @@ IDENTITY="${1:-Developer ID Application: JooWon Koh (7A77FCP9H4)}"
 PROFILE="${2:-webswing-notary}"
 APP="dist/mac/Desktop Shark.app"
 ZIP="dist/DesktopShark-mac.zip"
+# zip 은 **자동 업데이트가 받아 가는 것**이고, dmg 는 사람이 처음 설치할 때 받는 것이다.
+# 둘 다 만든다 — 앱이 dmg 를 마운트해서 자기를 갈아 끼우게 하면 실패할 자리가 너무 많다.
+DMG="dist/DesktopShark-mac.dmg"
 
 if ! security find-identity -v -p codesigning | grep -q "$IDENTITY"; then
     echo "인증서가 없습니다: $IDENTITY" >&2
@@ -52,5 +55,24 @@ ditto -c -k --keepParent "$APP" "$ZIP"
 echo "› Gatekeeper 가 보는 대로 검증"
 spctl --assess --type execute --verbose=4 "$APP"
 
-du -h "$ZIP" | awk '{print "› " $1 "  " $2}'
-echo "› 끝났습니다 — 더블클릭으로 열립니다"
+# dmg 도 따로 공증한다. **앱을 공증한 것과 dmg 를 공증한 것은 다른 일이다** —
+# 스테이플이 dmg 에 박혀 있어야 처음 여는 맥이 오프라인이어도 마운트가 통과한다.
+echo "› dmg 만들기"
+./mac/dmg.sh
+
+# **dmg 에도 서명한다.** 스테이플만 박으면 `stapler validate` 는 통과하지만
+# Gatekeeper 는 「no usable signature」로 거절한다 — 안의 앱이 멀쩡해도 dmg 를 열 때
+# 한 번 더 물어본다. 서명은 파일을 바꾸므로 **공증보다 먼저** 해야 한다(뒤에 하면 스테이플이 깨진다).
+echo "› dmg 서명"
+codesign --force --timestamp --sign "$IDENTITY" "$DMG"
+
+echo "› dmg 제출"
+xcrun notarytool submit "$DMG" --keychain-profile "$PROFILE" --wait
+xcrun stapler staple "$DMG"
+xcrun stapler validate "$DMG"
+
+# 받는 사람의 맥이 dmg 를 볼 때 그대로. execute 가 아니라 open 이다.
+spctl -a -t open --context context:primary-signature -vv "$DMG"
+
+du -h "$ZIP" "$DMG" | awk '{print "› " $1 "  " $2}'
+echo "› 끝났습니다 — dmg 를 열면 바로 끌어 넣을 수 있습니다"

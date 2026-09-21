@@ -1,6 +1,6 @@
 {
   "name": "desktop-shark",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "바탕화면에 사는 상어를 키우는 투명 오버레이 게임 (맥·윈도우)",
@@ -10,7 +10,8 @@
     "icons": "node scripts/make-icons.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "build:win": "./windows/build.sh --zip"
+    "build:win": "./windows/build.sh --zip",
+    "dmg": "./mac/dmg.sh"
   },
   "devDependencies": {
     "vitest": "^2.1.8"
