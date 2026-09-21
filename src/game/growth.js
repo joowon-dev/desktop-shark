@@ -4,7 +4,7 @@
 // 단계와 랭킹에 적힌 단계가 달라진다 — 고칠 때 둘 다 고친다.
 
 import {
-  GAME_MODE_ALPHA, MAX_ALPHA, STAGE_ALPHAS, STAGE_LENGTHS,
+  GAME_MODE_ALPHA, MAX_ALPHA, MIN_ALPHA, STAGE_ALPHAS, STAGE_LENGTHS,
   STAGE_THRESHOLDS, STATE_ALPHA,
 } from './constants.js'
 
@@ -37,12 +37,14 @@ export function baseAlphaOf(stage) {
 /**
  * 지금 얼마나 보이는가.
  *
- * 곱셈 한 자리다 — 단계가 오르면 숨어 있을 때(배율 0)만 빼고 전부 진해진다.
- * 「많이 먹일수록 형체가 또렷해진다」가 여기서 나온다.
+ * 곱셈 한 자리고 위아래로 받친다. 「많이 먹일수록 형체가 또렷해진다」가 여기서 나오고,
+ * **아무리 흐려도 사라지지는 않는다**(MIN_ALPHA).
  */
 export function visibility(stage, state, gameMode) {
-  const alpha = baseAlphaOf(stage) * (STATE_ALPHA[state] ?? 0) * (gameMode ? GAME_MODE_ALPHA : 1)
-  return Math.min(MAX_ALPHA, alpha)
+  const alpha = baseAlphaOf(stage)
+    * (STATE_ALPHA[state] ?? STATE_ALPHA.lurk)
+    * (gameMode ? GAME_MODE_ALPHA : 1)
+  return Math.min(MAX_ALPHA, Math.max(MIN_ALPHA, alpha))
 }
 
 /** 단계마다 몸에 붙는 것. 커질수록 상어다워진다. */

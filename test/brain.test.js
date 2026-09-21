@@ -42,18 +42,18 @@ describe('밥이 떨어지면 무조건 돌진', () => {
 
 describe('배고픔 경계', () => {
   it(`배고픔이 ${PROWL_THRESHOLD} 에 닿으면 에워싼다`, () => {
-    const brain = { ...createBrain(rng()), state: 'hidden', timer: 99 }
+    const brain = { ...createBrain(rng()), state: 'lurk', timer: 99 }
     expect(stepBrain(brain, ctx({ hunger: PROWL_THRESHOLD }), 1 / 60).state).toBe('prowl')
   })
 
   it('경계 바로 아래에서는 안 에워싼다', () => {
-    const brain = { ...createBrain(rng()), state: 'hidden', timer: 99 }
-    expect(stepBrain(brain, ctx({ hunger: PROWL_THRESHOLD - 0.001 }), 1 / 60).state).toBe('hidden')
+    const brain = { ...createBrain(rng()), state: 'lurk', timer: 99 }
+    expect(stepBrain(brain, ctx({ hunger: PROWL_THRESHOLD - 0.001 }), 1 / 60).state).toBe('lurk')
   })
 
   it('배가 부르면 에워싸기를 그만둔다', () => {
     const brain = { ...createBrain(rng()), state: 'prowl', timer: 99 }
-    expect(stepBrain(brain, ctx({ hunger: 0 }), 1 / 60).state).toBe('hidden')
+    expect(stepBrain(brain, ctx({ hunger: 0 }), 1 / 60).state).toBe('lurk')
   })
 
   it('순찰 중에 배가 고파지면 에워싼다', () => {
@@ -90,20 +90,20 @@ describe('먹고 나서', () => {
       brain = stepBrain(brain, ctx(), dt)
       steps += 1
     }
-    expect(brain.state).toBe('hidden')
+    expect(brain.state).toBe('lurk')
     expect(steps * dt).toBeCloseTo(SATED_DURATION, 1)
   })
 })
 
 describe('숨음 ↔ 순찰', () => {
   it('타이머가 다하면 순찰을 나간다', () => {
-    const brain = { ...createBrain(rng()), state: 'hidden', timer: 0.01 }
+    const brain = { ...createBrain(rng()), state: 'lurk', timer: 0.01 }
     expect(stepBrain(brain, ctx(), 1 / 60).state).toBe('cruise')
   })
 
   it('순찰은 시간이 다하면 끝난다 — 화면 밖으로 나가서 끝나지 않는다', () => {
     const brain = { ...createBrain(rng()), state: 'cruise', timer: 0.01 }
-    expect(stepBrain(brain, ctx(), 1 / 60).state).toBe('hidden')
+    expect(stepBrain(brain, ctx(), 1 / 60).state).toBe('lurk')
   })
 
   it('시간이 남아 있으면 계속 순찰한다', () => {
@@ -115,7 +115,7 @@ describe('숨음 ↔ 순찰', () => {
 describe('돌진 중에 밥이 사라지면', () => {
   it('숨는다 — 없는 밥을 계속 쫓지 않는다', () => {
     const brain = { ...createBrain(rng()), state: 'dash', timer: 99 }
-    expect(stepBrain(brain, ctx({ food: [] }), 1 / 60).state).toBe('hidden')
+    expect(stepBrain(brain, ctx({ food: [] }), 1 / 60).state).toBe('lurk')
   })
 })
 
@@ -149,7 +149,7 @@ describe('intent', () => {
 
   it('숨을 때도 목표는 화면 안이다 — 안 보일 뿐 나가지는 않는다', () => {
     for (let i = 0; i < 24; i += 1) {
-      const brain = { ...createBrain(rng()), state: 'hidden', hideAngle: (i / 24) * Math.PI * 2 }
+      const brain = { ...createBrain(rng()), state: 'lurk', lurkAngle: (i / 24) * Math.PI * 2 }
       const swimmer = { x: 0.8, y: 0.5, heading: 0, speed: 0.1 }
       const { target } = intent(brain, { swimmer, food: [], bounds })
       expect(isOffScreen(target, bounds)).toBe(false)

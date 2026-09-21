@@ -124,6 +124,12 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
     private var panelOpen = false
     /// 별명을 치는 중인가. **이때만** 키보드를 가져온다 — 그 밖에는 다른 창에 그대로 쳐진다.
     private var holdingKeyboard = false
+
+    /// 패널이 차지한 네모(창 안 좌표, 왼쪽 위 기준). 없으면 nil.
+    /// **커서가 이 안에 있을 때만** 창이 클릭을 받는다.
+    private var panelRect: NSRect?
+    /// 지금 커서가 패널 위인가. 매 틱 계산해서 들고 있는다.
+    private var cursorOverPanel = false
     /// 지금 클릭이 창을 통과하고 있는가. 매 프레임 창을 건드리지 않으려고 들고 있는다.
     private var passingThrough = true
 
@@ -263,6 +269,10 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
           releaseKeyboard: () => window.webkit.messageHandlers.shark.postMessage({ type: 'releaseKeyboard' }),
           saveDex: (d) => window.webkit.messageHandlers.shark.postMessage({
             type: 'dex', species: d && d.species, collected: d && d.collected,
+          }),
+          setPanelRect: (r) => window.webkit.messageHandlers.shark.postMessage({
+            type: 'panelRect',
+            rect: r ? { x: r.x, y: r.y, w: r.w, h: r.h } : null,
           }),
         }
         // 웹뷰는 콘솔이 안 보인다. 오류만이라도 셸의 stderr 로 흘려보낸다.
@@ -428,12 +438,16 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
     }
 
     private func pollInput() {
+        updateCursorOverPanel()
+
         let keys = keyCount()
         let clicks = clickCount()
 
         // 밥을 안 주는 동안에도 숫자는 흐른다. 따라만 두지 않으면 다시 켤 때
         // 그동안 친 것이 한꺼번에 쏟아진다.
-        guard gameMode, window.isVisible, !panelOpen else {
+        // **패널 위에서 누른 것만 빼고** 나머지는 그대로 밥이 된다 — 패널을 열어 뒀다고
+        // 밥 주기가 멈추면 랭킹을 보는 동안 상어가 굶는다.
+        guard gameMode, window.isVisible, !cursorOverPanel else {
             lastKeys = keys
             lastClicks = clicks
             return
@@ -450,6 +464,24 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
 
         lastKeys = keys
         lastClicks = clicks
+    }
+
+    /// 커서가 패널 네모 안에 있는지 보고, 그때만 창이 마우스를 받게 한다.
+    private func updateCursorOverPanel() {
+        let inside: Bool
+        if panelOpen, let rect = panelRect, window.isVisible {
+            let frame = window.frame
+            let cursor = NSEvent.mouseLocation
+            // 화면 좌표(왼쪽 아래 기준) → 창 안 좌표(왼쪽 위 기준)
+            let local = NSPoint(x: cursor.x - frame.minX, y: frame.maxY - cursor.y)
+            inside = NSPointInRect(local, rect)
+        } else {
+            inside = false
+        }
+
+        guard inside != cursorOverPanel else { return }
+        cursorOverPanel = inside
+        updateMousePass()
     }
 
     /// 커서 위치는 **화면 좌표**이고 원점이 왼쪽 아래다.
@@ -537,16 +569,20 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
         // 예전에는 열자마자 앱을 활성화했는데, 그러면 패널을 띄워 둔 채로 다른 창에
         // 한 글자도 못 친다 — 랭킹을 보면서 일할 수가 없다. 지금은 **마우스만** 받고
         // (버튼을 눌러야 하니까), 키보드는 별명 칸을 실제로 눌렀을 때만 가져온다.
+        if !open {
+            panelRect = nil
+            cursorOverPanel = false
+            releaseKeyboard()
+        }
         updateMousePass()
-        if !open { releaseKeyboard() }
     }
 
-    /// **창이 마우스를 받는 것은 패널이 열렸을 때뿐이다.**
+    /// **창이 마우스를 받는 것은 커서가 패널 네모 위에 있을 때뿐이다.**
     ///
-    /// 밥 주기가 켜져 있어도 클릭은 전부 밑의 앱으로 간다 — 늘 켜 두고 일해야 하므로
-    /// 창이 클릭을 삼키면 안 된다. 밥은 전역 모니터가 엿들어서 떨어뜨린다.
+    /// 패널이 열렸다고 화면 전체가 클릭을 받으면 다른 창을 아예 못 누르고, 누르지
+    /// 못하니 포커스도 못 옮겨 타자도 안 된다. 창은 하나이므로 **커서 자리로 가른다.**
     private func updateMousePass() {
-        let wantPass = !panelOpen
+        let wantPass = !cursorOverPanel
         guard wantPass != passingThrough else { return }
         passingThrough = wantPass
         window.ignoresMouseEvents = wantPass
@@ -608,6 +644,15 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
 
         case "closePanel":
             setPanel(false)
+
+        case "panelRect":
+            if let r = body["rect"] as? [String: Any],
+               let x = r["x"] as? Double, let y = r["y"] as? Double,
+               let w = r["w"] as? Double, let h = r["h"] as? Double {
+                panelRect = NSRect(x: x, y: y, width: w, height: h)
+            } else {
+                panelRect = nil
+            }
 
         case "grabKeyboard":
             grabKeyboard()

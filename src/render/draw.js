@@ -16,6 +16,18 @@ import { speciesOf } from '../game/species.js'
 /** 상어는 검은 실루엣이다. 색을 주면 그림이 되고, 그림이 되면 무섭지 않다. */
 const INK = '0, 8, 14'
 
+/**
+ * 실루엣을 두르는 밝은 테두리.
+ *
+ * **어두운 바탕화면에서는 검은 실루엣이 안 보인다.** 알파를 아무리 올려도 검정 위의
+ * 검정이다. 테두리를 두르면 밝은 배경에서는 몸이, 어두운 배경에서는 테두리가 상어를
+ * 보여 준다. 두 배경 모두에서 읽히는 유일한 방법이고, 물속에서 빛을 받은 등처럼도 보인다.
+ */
+const RIM = '214, 238, 252'
+
+/** 테두리의 최소 굵기(px). 아기상어에서도 선이 사라지지 않게. */
+const RIM_MIN_PX = 1.1
+
 /** 입선. 이빨이 이 선 위에 앉아야 해서 한 곳에 적어 두고 둘이 같이 본다. */
 const MOUTH = { x0: 0.468, y0: 0.012, x1: 0.288, y1: 0.060 }
 
@@ -38,10 +50,10 @@ export function draw(ctx, view, snap, extras = {}) {
   drawRipples(ctx, view, extras.ripples ?? [])
   drawFood(ctx, view, snap.food)
 
-  if (snap.alpha > 0.001) {
-    drawWake(ctx, view, snap, extras.wake ?? [])
-    drawShark(ctx, view, snap)
-  }
+  // **언제나 그린다.** 「안 보이는 상태」가 없어졌다(MIN_ALPHA) — 여기에 문턱을
+  // 두면 그 문턱이 곧 상어가 사라지는 조건이 된다.
+  drawWake(ctx, view, snap, extras.wake ?? [])
+  drawShark(ctx, view, snap)
 }
 
 // MARK: 상어
@@ -171,7 +183,7 @@ function drawShark(ctx, view, snap) {
   ctx.translate(swimmer.x * view.scale, swimmer.y * view.scale)
   ctx.rotate(swimmer.heading)
   ctx.scale(size, size)
-  drawSharkBody(ctx, snap.species, snap.stage, alpha, phase, amount)
+  drawSharkBody(ctx, snap.species, snap.stage, alpha, phase, amount, size)
   ctx.restore()
 }
 
@@ -180,11 +192,9 @@ function drawShark(ctx, view, snap) {
  *
  * **도감도 이 함수를 쓴다.** 도감의 그림과 화면의 상어가 다르면 도감이 아니다.
  */
-export function drawSharkBody(ctx, speciesKey, stage, alpha, phase = 0, amount = 0) {
+export function drawSharkBody(ctx, speciesKey, stage, alpha, phase = 0, amount = 0, sizePx = 200) {
   const detail = detailOf(stage)
   const species = speciesOf(speciesKey)
-
-  ctx.fillStyle = `rgba(${INK}, ${alpha})`
 
   // **몸통과 지느러미를 한 path 에 담아 한 번만 칠한다.**
   // 따로 칠하면 겹치는 자리에서 반투명이 두 번 쌓여 지느러미 밑동에 이음매가 비친다.
@@ -200,6 +210,22 @@ export function drawSharkBody(ctx, speciesKey, stage, alpha, phase = 0, amount =
   if (species.extras.includes('saw')) {
     for (const piece of sawSnout(species)) addSharp(ctx, piece)
   }
+  // 테두리는 **바깥 윤곽에만** 남아야 한다.
+  //
+  // 그냥 stroke 하면 지느러미 조각들의 선이 몸 안쪽에도 그려져서 철사 모형이 된다.
+  // 두껍게 긋고 → 몸 안쪽을 지우고 → 몸을 칠하면, 안쪽 절반과 내부 선이 함께
+  // 사라지고 바깥 절반만 남는다.
+  const rim = Math.max(RIM_MIN_PX / sizePx, 0.010)
+  ctx.lineJoin = 'round'
+  ctx.lineWidth = rim * 2
+  ctx.strokeStyle = `rgba(${RIM}, ${Math.min(1, alpha * 1.6)})`
+  ctx.stroke()
+
+  ctx.globalCompositeOperation = 'destination-out'
+  ctx.fill()
+  ctx.globalCompositeOperation = 'source-over'
+
+  ctx.fillStyle = `rgba(${INK}, ${alpha})`
   ctx.fill()
 
   // 아래는 전부 실루엣을 **파내는** 것이다. 검은 덩어리에 구멍이 나야 얼굴이 생긴다.

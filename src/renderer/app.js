@@ -84,6 +84,7 @@ function frame(timestamp) {
 
   ageTrails(frameSeconds)
   draw(ctx, view, snapshot(engine), { wake, ripples })
+  reportPanelRect()
   requestAnimationFrame(frame)
 }
 
@@ -91,11 +92,9 @@ function frame(timestamp) {
 function afterStep() {
   const snap = snapshot(engine)
 
-  if (snap.alpha > 0.02) {
-    wake.push({
-      x: engine.swimmer.x, y: engine.swimmer.y, heading: engine.swimmer.heading, age: 0,
-    })
-  }
+  wake.push({
+    x: engine.swimmer.x, y: engine.swimmer.y, heading: engine.swimmer.heading, age: 0,
+  })
 
   if (engine.justAte) {
     const mouthX = engine.swimmer.x
@@ -260,7 +259,7 @@ function refreshDex() {
     c.translate(w / 2, h / 2)
     c.scale(w * 0.82, w * 0.82)
     // **화면의 상어와 같은 함수로 그린다.** 다르면 도감이 아니다.
-    drawSharkBody(c, key, 6, known ? 0.92 : 0.5, 0, 0)
+    drawSharkBody(c, key, 6, known ? 0.92 : 0.5, 0, 0, w * 0.82)
     card.appendChild(canvas)
 
     const label = document.createElement('div')
@@ -306,6 +305,36 @@ for (const tab of document.querySelectorAll('.tab')) {
     if (tab.dataset.tab === 'dex') refreshDex()
     else if (rankingOn) refreshRanking()
   })
+}
+
+// MARK: 패널이 차지한 자리를 셸에 알린다
+//
+// **셸은 이 네모 위에 커서가 있을 때만 클릭을 받는다.** 안 그러면 패널을 여는 순간
+// 화면 전체가 클릭을 삼켜서 다른 창을 아예 못 누르고, 누르지 못하니 포커스도 못 옮겨
+// 타자도 안 된다. 실제로 그렇게 만들어 놓고 한참 못 알아챘다.
+//
+// 끌어 옮기거나 탭을 바꾸면 자리가 달라지므로 매 프레임 견줘 보고 달라졌을 때만 알린다.
+
+let lastRect = null
+
+function reportPanelRect() {
+  if (panel.hidden) {
+    if (lastRect !== null) {
+      lastRect = null
+      bridge?.setPanelRect?.(null)
+    }
+    return
+  }
+
+  const box = panel.getBoundingClientRect()
+  const next = { x: box.left, y: box.top, w: box.width, h: box.height }
+  const same = lastRect
+    && Math.abs(lastRect.x - next.x) < 0.5 && Math.abs(lastRect.y - next.y) < 0.5
+    && Math.abs(lastRect.w - next.w) < 0.5 && Math.abs(lastRect.h - next.h) < 0.5
+  if (same) return
+
+  lastRect = next
+  bridge?.setPanelRect?.(next)
 }
 
 // MARK: 패널 옮기기

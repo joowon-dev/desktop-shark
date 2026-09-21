@@ -257,6 +257,14 @@ sealed class Overlay : Form
     /// <summary>별명을 치는 중인가. <b>이때만</b> 키보드를 가져온다.</summary>
     private bool holdingKeyboard;
 
+    /// <summary>
+    /// 패널이 차지한 네모(창 안 좌표, 왼쪽 위 기준). 비어 있으면 패널이 없다.
+    /// <b>커서가 이 안에 있을 때만</b> 창이 클릭을 받는다 — 패널을 열었다고 화면
+    /// 전체가 클릭을 삼키면 다른 창을 아예 못 누르고, 누르지 못하니 타자도 안 된다.
+    /// </summary>
+    private Rectangle panelRect = Rectangle.Empty;
+    private bool cursorOverPanel;
+
     /// <summary>얹을 모니터의 장치 이름. 없거나 사라졌으면 주 화면.</summary>
     public string? ScreenName { get; private set; }
 
@@ -354,22 +362,30 @@ sealed class Overlay : Form
 
     private IntPtr MouseHook(int code, IntPtr wParam, IntPtr lParam)
     {
-        if (code >= 0 && Feeding)
+        if (code >= 0)
         {
-            var message = (int)wParam;
-            if (message == WM_LBUTTONDOWN || message == WM_RBUTTONDOWN || message == WM_MBUTTONDOWN)
+            var data = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);
+            // 훅은 화면 좌표를 준다. 웹뷰는 창 안 왼쪽 위 기준이다.
+            var bounds = Bounds;
+            var x = data.x - bounds.Left;
+            var y = data.y - bounds.Top;
+            var over = panelOpen && !panelRect.IsEmpty && panelRect.Contains(x, y);
+
+            if (over != cursorOverPanel)
             {
-                var data = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);
-                // 훅은 화면 좌표를 준다. 웹뷰는 창 안 왼쪽 위 기준이다.
-                var bounds = Bounds;
-                if (data.x >= bounds.Left && data.x < bounds.Right
-                    && data.y >= bounds.Top && data.y < bounds.Bottom)
-                {
-                    var x = data.x - bounds.Left;
-                    var y = data.y - bounds.Top;
-                    // 훅 안에서는 오래 붙잡으면 안 된다 — 윈도우가 훅을 떼어 버린다.
-                    BeginInvoke(() => Send($"window.__sharkFeed && window.__sharkFeed({x}, {y})"));
-                }
+                cursorOverPanel = over;
+                BeginInvoke(UpdateMousePass);
+            }
+
+            var message = (int)wParam;
+            var pressed = message == WM_LBUTTONDOWN || message == WM_RBUTTONDOWN
+                || message == WM_MBUTTONDOWN;
+            if (pressed && Feeding
+                && data.x >= bounds.Left && data.x < bounds.Right
+                && data.y >= bounds.Top && data.y < bounds.Bottom)
+            {
+                // 훅 안에서는 오래 붙잡으면 안 된다 — 윈도우가 훅을 떼어 버린다.
+                BeginInvoke(() => Send($"window.__sharkFeed && window.__sharkFeed({x}, {y})"));
             }
         }
         return CallNextHookEx(mouseHook, code, wParam, lParam);
@@ -389,8 +405,11 @@ sealed class Overlay : Form
         return CallNextHookEx(keyHook, code, wParam, lParam);
     }
 
-    /// <summary>지금 밥이 떨어지는가. 패널이 열려 있으면 그쪽 조작이 우선이다.</summary>
-    private bool Feeding => GameMode && ready && Visible && !panelOpen;
+    /// <summary>
+    /// 지금 밥이 떨어지는가. <b>패널 위에서 누른 것만</b> 뺀다 — 패널을 열어 뒀다고
+    /// 밥 주기가 멈추면 랭킹을 보는 동안 상어가 굶는다.
+    /// </summary>
+    private bool Feeding => GameMode && ready && Visible && !cursorOverPanel;
 
     /// <summary>빈 영역으로 블러를 켠다 — 흐림은 없고 픽셀 단위 알파만 얻는다.</summary>
     private void EnablePerPixelAlpha()
@@ -511,6 +530,9 @@ sealed class Overlay : Form
           saveDex: (d) => window.chrome.webview.postMessage({
             type: 'dex', species: d && d.species, collected: d && d.collected,
           }),
+          setPanelRect: (r) => window.chrome.webview.postMessage({
+            type: 'panelRect', x: r ? r.x : -1, y: r ? r.y : -1, w: r ? r.w : 0, h: r ? r.h : 0,
+          }),
         }
         window.addEventListener('error', (e) => window.chrome.webview.postMessage({
           type: 'log', text: `${e.message} (${e.filename}:${e.lineno})`,
@@ -542,14 +564,14 @@ sealed class Overlay : Form
     }
 
     /// <summary>
-    /// <b>창이 마우스를 받는 것은 패널이 열렸을 때뿐이다.</b>
+    /// <b>창이 마우스를 받는 것은 커서가 패널 네모 위에 있을 때뿐이다.</b>
     ///
-    /// 밥 주기가 켜져 있어도 클릭은 전부 밑의 앱으로 간다 — 늘 켜 두고 일해야 하므로
-    /// 창이 클릭을 삼키면 안 된다. 밥은 저수준 훅이 엿들어서 떨어뜨린다.
+    /// 패널이 열렸다고 화면 전체가 클릭을 받으면 다른 창을 아예 못 누르고, 누르지
+    /// 못하니 포커스도 못 옮겨 타자도 안 된다. 창은 하나이므로 커서 자리로 가른다.
     /// </summary>
     private void UpdateMousePass()
     {
-        var wantPass = !panelOpen;
+        var wantPass = !cursorOverPanel;
         if (wantPass == passingThrough) return;
         passingThrough = wantPass;
         DebugLog($"pass {wantPass}");
@@ -584,7 +606,13 @@ sealed class Overlay : Form
         // **패널을 열어도 키보드는 안 가져간다.** 가져가면 랭킹을 띄워 둔 채로 다른
         // 창에 한 글자도 못 친다. 마우스만 받고(버튼을 눌러야 하니까), 키보드는
         // 별명 칸을 실제로 눌렀을 때만 가져온다.
-        if (!open) ReleaseKeyboard();
+        if (!open)
+        {
+            panelRect = Rectangle.Empty;
+            cursorOverPanel = false;
+            ReleaseKeyboard();
+        }
+        UpdateMousePass();
     }
 
     /// <summary>별명 칸을 눌렀다. 이제서야 키보드를 가져온다.</summary>
@@ -687,6 +715,23 @@ sealed class Overlay : Form
                 case "closePanel":
                     SetPanel(false);
                     return;
+
+                case "panelRect":
+                {
+                    var w = body.TryGetProperty("w", out var pw) ? pw.GetDouble() : 0;
+                    var h = body.TryGetProperty("h", out var ph) ? ph.GetDouble() : 0;
+                    if (w <= 0 || h <= 0)
+                    {
+                        panelRect = Rectangle.Empty;
+                    }
+                    else
+                    {
+                        var x = body.TryGetProperty("x", out var px) ? px.GetDouble() : 0;
+                        var y = body.TryGetProperty("y", out var py) ? py.GetDouble() : 0;
+                        panelRect = new Rectangle((int)x, (int)y, (int)w, (int)h);
+                    }
+                    return;
+                }
 
                 case "grabKeyboard":
                     GrabKeyboard();

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  GAME_MODE_ALPHA, MAX_ALPHA, RIPPLE_ALPHA, STAGE_THRESHOLDS,
+  GAME_MODE_ALPHA, MAX_ALPHA, MIN_ALPHA, RIPPLE_ALPHA, STAGE_THRESHOLDS, STATE_ALPHA,
   WAKE_ALPHA, WAKE_LIFE, WAKE_SPREAD, WAKE_WIDTH,
 } from '../src/game/constants.js'
 import { baseAlphaOf, detailOf, lengthOf, stageOf, toNextStage, visibility } from '../src/game/growth.js'
@@ -57,15 +57,39 @@ describe('크기와 선명도', () => {
 })
 
 describe('visibility', () => {
-  it('숨어 있으면 단계가 아무리 높아도 안 보인다', () => {
-    expect(visibility(6, 'hidden', true)).toBe(0)
-    expect(visibility(1, 'hidden', false)).toBe(0)
+  it('**상어는 절대 사라지지 않는다**', () => {
+    // 처음에는 「숨음」이 알파 0 이라 20~45 초 동안 통째로 없어졌다. 바탕화면에서
+    // 같이 사는 앱에서는 그게 그냥 없어지는 것으로 보인다. 흐린 것과 없는 것은 다르다.
+    for (const state of ['lurk', 'cruise', 'prowl', 'dash', 'eat', 'sated']) {
+      for (let stage = 1; stage <= 6; stage += 1) {
+        for (const mode of [true, false]) {
+          expect(visibility(stage, state, mode), `${stage}단계 ${state}`)
+            .toBeGreaterThanOrEqual(MIN_ALPHA)
+        }
+      }
+    }
+  })
+
+  it('모르는 상태가 와도 사라지지 않는다 — 저장값이 낡아도 안 깨진다', () => {
+    expect(visibility(1, '없는상태', false)).toBeGreaterThanOrEqual(MIN_ALPHA)
+  })
+
+  it('어슬렁거릴 때가 제일 흐리다', () => {
+    for (const state of ['cruise', 'prowl', 'dash', 'eat', 'sated']) {
+      expect(visibility(4, 'lurk', false), state)
+        .toBeLessThanOrEqual(visibility(4, state, false))
+    }
   })
 
   it('같은 상태라면 단계가 높을수록 진하다', () => {
     for (let s = 1; s < 6; s += 1) {
       expect(visibility(s + 1, 'cruise', false)).toBeGreaterThan(visibility(s, 'cruise', false))
     }
+  })
+
+  it('받침에 걸리는 조합이 실제로 있다 — 없으면 MIN_ALPHA 는 죽은 코드다', () => {
+    expect(baseAlphaOf(1) * STATE_ALPHA.lurk).toBeLessThan(MIN_ALPHA)
+    expect(visibility(1, 'lurk', false)).toBe(MIN_ALPHA)
   })
 
   it('돌진이 순찰보다 진하다 — 달려올 때 제일 잘 보인다', () => {
@@ -77,9 +101,12 @@ describe('visibility', () => {
   })
 
   it(`게임모드에서 ${GAME_MODE_ALPHA}배 진해진다`, () => {
-    // 상한에 안 걸리는 낮은 단계에서 재야 배율이 드러난다.
-    const off = visibility(1, 'cruise', false)
-    const on = visibility(1, 'cruise', true)
+    // **위아래 받침에 안 걸리는 가운데에서 재야** 배율이 드러난다.
+    // 1 단계는 아래 받침(MIN_ALPHA)에, 6 단계 돌진은 위 상한에 걸린다.
+    const off = visibility(3, 'cruise', false)
+    const on = visibility(3, 'cruise', true)
+    expect(off).toBeGreaterThan(MIN_ALPHA)
+    expect(on).toBeLessThan(MAX_ALPHA)
     expect(on / off).toBeCloseTo(GAME_MODE_ALPHA, 6)
   })
 

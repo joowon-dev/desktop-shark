@@ -8,25 +8,25 @@
 
 import {
   CRUISE_MAX, CRUISE_MIN, CRUISE_SPEED, DASH_MULTIPLIER, DASH_TURN_RATE, EAT_DURATION,
-  HIDE_MAX, HIDE_MIN, PROWL_SPEED, SATED_DURATION, SATED_SPEED, TURN_RATE, WALL_MARGIN,
+  LURK_MAX, LURK_MIN, PROWL_SPEED, SATED_DURATION, SATED_SPEED, TURN_RATE, WALL_MARGIN,
 } from './constants.js'
 import { isHungry } from './hunger.js'
 import { bestFood } from './food.js'
 import { range } from './rng.js'
 
-export const STATES = ['hidden', 'cruise', 'prowl', 'dash', 'eat', 'sated']
+export const STATES = ['lurk', 'cruise', 'prowl', 'dash', 'eat', 'sated']
 
 /** 화면 밖으로 이만큼 나가면 「사라졌다」로 본다. 이제는 거기까지 갈 일이 없다. */
 const OFF_SCREEN = 0.35
 
 export function createBrain(rng) {
   return {
-    state: 'hidden',
-    timer: range(rng, HIDE_MIN, HIDE_MAX),
-    /** 에워쌀 때·숨을 때 도는 각도. */
+    state: 'lurk',
+    timer: range(rng, LURK_MIN, LURK_MAX),
+    /** 에워쌀 때·어슬렁거릴 때 도는 각도. */
     prowlAngle: range(rng, 0, Math.PI * 2),
-    /** 숨었을 때 머무는 쪽. 화면 안이다. */
-    hideAngle: range(rng, 0, Math.PI * 2),
+    /** 어슬렁거릴 때 머무는 쪽. 화면 안이다. */
+    lurkAngle: range(rng, 0, Math.PI * 2),
   }
 }
 
@@ -66,14 +66,14 @@ export function intent(brain, ctx) {
   const center = { x: bounds.w / 2, y: bounds.h / 2 }
 
   switch (brain.state) {
-    case 'hidden': {
-      // **화면 안에 있다.** 보이지 않을 뿐(가시성 배율이 0) 밖으로 나가지는 않는다.
-      // 한쪽 구석에서 느리게 맴돌다 순찰 시간이 되면 나온다.
+    case 'lurk': {
+      // 평소 상태. **사라지지 않는다** — 제일 흐릴 뿐 화면 어딘가에 늘 있다.
+      // 한쪽에서 느리게 맴돌다 순찰 시간이 되면 가로질러 나간다.
       const radius = Math.min(bounds.w, bounds.h) * 0.30
       return {
         target: keepInside({
-          x: center.x + Math.cos(brain.hideAngle) * radius,
-          y: center.y + Math.sin(brain.hideAngle) * radius,
+          x: center.x + Math.cos(brain.lurkAngle) * radius,
+          y: center.y + Math.sin(brain.lurkAngle) * radius,
         }, swimmer, bounds),
         speed: CRUISE_SPEED * 0.55,
         turnRate: TURN_RATE,
@@ -163,28 +163,28 @@ export function stepBrain(brain, ctx, dt) {
       return next
 
     case 'dash':
-      // 쫓던 밥이 사라졌다(수명이 다했거나). 숨는다.
-      if (food.length === 0) return { ...next, state: 'hidden', timer: hideDelay(rng), hideAngle: nearbyAngle(swimmer, bounds) }
+      // 쫓던 밥이 사라졌다(수명이 다했거나). 도로 어슬렁거린다.
+      if (food.length === 0) return { ...next, state: 'lurk', timer: lurkDelay(rng), lurkAngle: nearbyAngle(swimmer, bounds) }
       return next
 
     case 'sated':
       if (food.length > 0) return { ...next, state: 'dash' }
-      if (next.timer <= 0) return { ...next, state: 'hidden', timer: hideDelay(rng), hideAngle: nearbyAngle(swimmer, bounds) }
+      if (next.timer <= 0) return { ...next, state: 'lurk', timer: lurkDelay(rng), lurkAngle: nearbyAngle(swimmer, bounds) }
       return next
 
     case 'prowl':
       if (food.length > 0) return { ...next, state: 'dash' }
-      if (!isHungry(hunger)) return { ...next, state: 'hidden', timer: hideDelay(rng), hideAngle: nearbyAngle(swimmer, bounds) }
+      if (!isHungry(hunger)) return { ...next, state: 'lurk', timer: lurkDelay(rng), lurkAngle: nearbyAngle(swimmer, bounds) }
       return next
 
     case 'cruise':
       if (food.length > 0) return { ...next, state: 'dash' }
       if (isHungry(hunger)) return { ...next, state: 'prowl' }
-      // **화면 밖으로 나가서 끝나지 않는다** — 정해진 시간만큼 돌다 다시 숨는다.
-      if (next.timer <= 0) return { ...next, state: 'hidden', timer: hideDelay(rng), hideAngle: nearbyAngle(swimmer, bounds) }
+      // **화면 밖으로 나가서 끝나지 않는다** — 정해진 시간만큼 돌다 도로 어슬렁거린다.
+      if (next.timer <= 0) return { ...next, state: 'lurk', timer: lurkDelay(rng), lurkAngle: nearbyAngle(swimmer, bounds) }
       return next
 
-    case 'hidden':
+    case 'lurk':
     default:
       if (food.length > 0) return { ...next, state: 'dash' }
       if (isHungry(hunger)) return { ...next, state: 'prowl' }
@@ -193,8 +193,8 @@ export function stepBrain(brain, ctx, dt) {
   }
 }
 
-export function hideDelay(rng) {
-  return range(rng, HIDE_MIN, HIDE_MAX)
+export function lurkDelay(rng) {
+  return range(rng, LURK_MIN, LURK_MAX)
 }
 
 /** 화면 밖으로 충분히 나갔는가. 이제는 거기까지 갈 일이 없다. */
@@ -203,7 +203,7 @@ export function isOffScreen(point, bounds) {
     || point.y < -OFF_SCREEN || point.y > bounds.h + OFF_SCREEN
 }
 
-/** 숨을 때 머물 쪽 — 지금 있는 쪽. 화면 안이다. */
+/** 어슬렁거릴 쪽 — 지금 있는 쪽. 화면 안이다. */
 function nearbyAngle(point, bounds) {
   return Math.atan2(point.y - bounds.h / 2, point.x - bounds.w / 2)
 }
