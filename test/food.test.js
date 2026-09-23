@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  EAT_RADIUS, FOOD_FLOOR, FOOD_KINDS, FOOD_LIFETIME, FOOD_SINK_SPEED, MAX_FOOD,
+  EAT_RADIUS, FOOD_FLOOR, FOOD_INSET, FOOD_KINDS, FOOD_LIFETIME, FOOD_SINK_SPEED, MAX_FOOD,
 } from '../src/game/constants.js'
 import {
   bestFood, canEat, createFood, dropFood, foodAlpha, nearestFood, removeFood, stepFood,
@@ -21,6 +21,25 @@ describe('dropFood', () => {
   it('가득 차지 않았으면 뒤에 붙는다', () => {
     const list = dropFood([createFood(1, 0.1, 0.1)], 2, 0.9, 0.9)
     expect(list.map((f) => f.id)).toEqual([1, 2])
+  })
+
+  it('**화면 밖에서 눌러도 가장자리에 떨어진다** — 셸이 여기에 기대고 있다', () => {
+    // 모니터가 여러 대면 셸은 다른 화면에서 누른 클릭도 그대로 넘긴다. 좌표가 음수거나
+    // 화면보다 크게 들어오는데, 여기서 끌어당기지 않으면 밥이 화면 밖에 놓이고
+    // 상어는 영영 못 먹는다. 걸러 내는 일은 셸이 하지 않는다 — 여기 한 곳이다.
+    const bounds = { w: 16 / 9, h: 1 }
+    const far = [
+      dropFood([], 1, -1200, 0.5, 'big', bounds)[0],   // 왼쪽 모니터
+      dropFood([], 2, 5000, 0.5, 'big', bounds)[0],    // 오른쪽 모니터
+      dropFood([], 3, 0.8, -900, 'big', bounds)[0],    // 위
+      dropFood([], 4, 0.8, 4000, 'big', bounds)[0],    // 아래
+    ]
+    for (const food of far) {
+      expect(food.x).toBeGreaterThanOrEqual(FOOD_INSET)
+      expect(food.x).toBeLessThanOrEqual(bounds.w - FOOD_INSET)
+      expect(food.y).toBeGreaterThanOrEqual(FOOD_INSET)
+      expect(food.y).toBeLessThanOrEqual(bounds.h - FOOD_FLOOR)
+    }
   })
 })
 

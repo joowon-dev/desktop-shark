@@ -1,6 +1,6 @@
 {
   "name": "desktop-shark",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
   "description": "바탕화면에 사는 상어를 키우는 투명 오버레이 게임 (맥·윈도우)",

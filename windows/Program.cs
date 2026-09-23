@@ -139,6 +139,8 @@ sealed class Overlay : Form
     private const int WS_EX_TRANSPARENT = 0x00000020;
     private const int WS_EX_TOOLWINDOW = 0x00000080;
     private const int WS_EX_NOACTIVATE = 0x08000000;
+    private const int WS_EX_LAYERED = 0x00080000;
+    private const uint LWA_ALPHA = 0x00000002;
 
     private const int WM_HOTKEY = 0x0312;
     private const int MOD_ALT = 0x0001;
@@ -184,6 +186,9 @@ sealed class Overlay : Form
 
     [DllImport("user32.dll")] private static extern int GetWindowLong(IntPtr hWnd, int index);
     [DllImport("user32.dll")] private static extern int SetWindowLong(IntPtr hWnd, int index, int value);
+    [DllImport("user32.dll")] private static extern bool EnumChildWindows(IntPtr parent, EnumWindowsProc proc, IntPtr param);
+    [DllImport("user32.dll")] private static extern bool SetLayeredWindowAttributes(IntPtr hWnd, uint key, byte alpha, uint flags);
+    private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr param);
     [DllImport("user32.dll")] private static extern bool RegisterHotKey(IntPtr hWnd, int id, int mod, int vk);
     [DllImport("user32.dll")] private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
     [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hWnd);
@@ -489,9 +494,17 @@ sealed class Overlay : Form
         {
             var p = base.CreateParams;
             p.ExStyle |= WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
+            // **마지막 수단.** 창 하나만으로 클릭이 안 통과하는 기계가 있으면
+            // SHARK_LAYERED=1 로 레이어드 창으로 만들어 본다. 기본으로 켜지 않는 것은
+            // 레이어드가 합성 경로를 바꿔서 지금 잘 나오는 반투명을 망칠 수 있어서다.
+            if (Layered) p.ExStyle |= WS_EX_LAYERED;
             return p;
         }
     }
+
+    /// <summary>SHARK_LAYERED=1 이면 레이어드 창으로 만든다. 위 주석 참고.</summary>
+    private static bool Layered =>
+        Environment.GetEnvironmentVariable("SHARK_LAYERED") == "1";
 
     /// <summary>뜰 때 포커스를 가져가지 않는다. 아래 앱에서 하던 일이 끊기면 안 된다.</summary>
     protected override bool ShowWithoutActivation => true;
@@ -501,6 +514,9 @@ sealed class Overlay : Form
         base.OnHandleCreated(e);
 
         SetWindowLong(Handle, GWL_EXSTYLE, GetWindowLong(Handle, GWL_EXSTYLE) | WS_EX_TRANSPARENT);
+        // 레이어드 창은 알파를 정해 주지 않으면 **아예 안 그려진다.** 255 는 「창 전체에
+        // 덧입히는 투명도는 없음」이고, 픽셀마다의 투명은 아래 DWM 이 맡는다.
+        if (Layered) SetLayeredWindowAttributes(Handle, 0, 255, LWA_ALPHA);
         EnablePerPixelAlpha();
 
         // **등록이 성공해도 시스템이 먼저 가로챌 수 있다.** 성공은 검증이 아니다.
@@ -550,9 +566,11 @@ sealed class Overlay : Form
             var message = (int)wParam;
             var pressed = message == WM_LBUTTONDOWN || message == WM_RBUTTONDOWN
                 || message == WM_MBUTTONDOWN;
-            if (pressed && Feeding
-                && data.x >= bounds.Left && data.x < bounds.Right
-                && data.y >= bounds.Top && data.y < bounds.Bottom)
+            // **어느 모니터에서 눌렀든 밥이 된다.** 상어가 얹힌 화면 밖을 누르면 좌표가
+            // 음수이거나 화면보다 크게 나오는데, 엔진이 가장자리로 끌어당겨 준다
+            // (dropFood → clampFood). 예전에는 여기서 걸러 내서, 듀얼 모니터의 다른
+            // 쪽에서는 아무리 눌러도 밥이 안 떨어졌다 — 타자는 되는데 클릭만 안 됐다.
+            if (pressed && Feeding)
             {
                 // 훅 안에서는 오래 붙잡으면 안 된다 — 윈도우가 훅을 떼어 버린다.
                 BeginInvoke(() => Send($"window.__sharkFeed && window.__sharkFeed({x}, {y})"));
@@ -654,6 +672,10 @@ sealed class Overlay : Form
         web.CoreWebView2.Navigate("https://shark.local/renderer/index.html");
 
         ready = true;
+
+        // **여기서 다시 건다.** WebView2 의 자식 창은 지금에서야 생겼고, 그 자식이
+        // 클릭을 삼키면 상어가 얹힌 모니터 전체가 먹통이 된다(ApplyClickThrough 참고).
+        UpdateMousePass(force: true);
     }
 
     /// <summary>
@@ -742,16 +764,39 @@ sealed class Overlay : Form
     /// 패널이 열렸다고 화면 전체가 클릭을 받으면 다른 창을 아예 못 누르고, 누르지
     /// 못하니 포커스도 못 옮겨 타자도 안 된다. 창은 하나이므로 커서 자리로 가른다.
     /// </summary>
-    private void UpdateMousePass()
+    private void UpdateMousePass(bool force = false)
     {
         var wantPass = !cursorOverPanel;
-        if (wantPass == passingThrough) return;
+        if (wantPass == passingThrough && !force) return;
         passingThrough = wantPass;
         DebugLog($"pass {wantPass}");
+        ApplyClickThrough(wantPass);
+    }
 
-        var style = GetWindowLong(Handle, GWL_EXSTYLE);
-        SetWindowLong(Handle, GWL_EXSTYLE,
-            wantPass ? style | WS_EX_TRANSPARENT : style & ~WS_EX_TRANSPARENT);
+    /// <summary>
+    /// <b>창 하나에만 걸면 모자란다 — WebView2 가 자기 자식 창을 만든다.</b>
+    ///
+    /// 폼에 WS_EX_TRANSPARENT 를 붙여도 그 안의 WebView2 자식 창(Chrome_WidgetWin_… )
+    /// 에는 안 붙는다. 그 자식이 클릭을 받아 삼키면, 상어가 얹힌 모니터에서는 밑의 앱을
+    /// 누를 수가 없고 — 누르지 못하니 포커스도 못 옮겨 — 타자도 안 된다. 실제로 그렇게
+    /// 나왔다(윈도우 사용자 후기, 듀얼 모니터에서 상어가 있는 쪽만 먹통).
+    ///
+    /// 저수준 훅은 이벤트가 어느 창으로 갈지 정해지기 <b>전에</b> 구경하므로, 클릭이
+    /// 삼켜지는 동안에도 밥은 떨어졌다 — 그래서 「밥은 되는데 클릭이 안 된다」로 보였다.
+    ///
+    /// 자식은 WebView2 가 준비된 뒤에야 생긴다. 그래서 InitWebAsync 끝에서 한 번 더 건다.
+    /// </summary>
+    private void ApplyClickThrough(bool pass)
+    {
+        Touch(Handle);
+        EnumChildWindows(Handle, (child, _) => { Touch(child); return true; }, IntPtr.Zero);
+
+        void Touch(IntPtr hWnd)
+        {
+            var style = GetWindowLong(hWnd, GWL_EXSTYLE);
+            SetWindowLong(hWnd, GWL_EXSTYLE,
+                pass ? style | WS_EX_TRANSPARENT : style & ~WS_EX_TRANSPARENT);
+        }
     }
 
     /// <summary>랭킹을 켜고 끈다. 끄면 아무것도 서버로 안 보낸다 — 상어는 그대로 자란다.</summary>

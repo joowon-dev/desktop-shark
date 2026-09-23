@@ -693,10 +693,13 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
 
     /// 커서 위치는 **화면 좌표**이고 원점이 왼쪽 아래다.
     /// 웹뷰는 창 안의 왼쪽 위 기준이라 두 번 옮겨야 한다.
+    ///
+    /// **어느 모니터에서 눌렀든 밥이 된다.** 상어가 얹힌 화면 밖을 누르면 좌표가
+    /// 음수이거나 화면보다 크게 나오는데, 엔진이 가장자리로 끌어당겨 준다
+    /// (dropFood → clampFood). 예전에는 여기서 걸러 내서, 듀얼 모니터의 다른 쪽에서는
+    /// 아무리 눌러도 밥이 안 떨어졌다 — 타자는 되는데 클릭만 안 됐다.
     private func heardClick(at screenPoint: NSPoint) {
         let frame = window.frame
-        guard NSPointInRect(screenPoint, frame) else { return }
-
         let x = screenPoint.x - frame.minX
         let y = frame.maxY - screenPoint.y   // 위아래를 뒤집는다
 
