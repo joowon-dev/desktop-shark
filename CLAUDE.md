@@ -196,9 +196,13 @@ npm run dmg        # dist/DesktopShark-mac.dmg (임시 서명. 배포용 아님)
 - `ApplyClickThrough` 가 폼과 `EnumChildWindows` 로 찾은 자식 전부에 건다.
 - 자식은 **WebView2 가 준비된 뒤에야 생긴다.** 그래서 `InitWebAsync` 끝에서
   `UpdateMousePass(force: true)` 로 한 번 더 건다. 창을 만들 때 한 번만 걸면 소용없다.
-- 그래도 안 되는 기계가 있으면 `SHARK_LAYERED=1` 로 레이어드 창을 켜 본다. 기본으로
-  켜지 않는 것은 레이어드가 합성 경로를 바꿔서 **지금 잘 나오는 반투명을 망칠 수 있어서**다
-  (켜면 `SetLayeredWindowAttributes` 로 알파를 채워 줘야 한다 — 안 그러면 창이 아예 안 그려진다).
+- **그것만으로는 모자랐다 — `WS_EX_TRANSPARENT` 는 `WS_EX_LAYERED` 와 같이 있어야만 클릭을
+  통과시킨다.** 예전에는 레이어드를 `SHARK_LAYERED=1` 일 때만 켰고, 치이카와 윈도우판(같은 구조)이
+  실제 PC 에서 화면 전체 클릭·키보드가 먹통이 되어 드러났다. v1.0.2 부터 레이어드가 기본이다.
+  레이어드는 `SetLayeredWindowAttributes` 로 알파를 채워 줘야 그려지고, 여기에 **검정 컬러 키**를
+  같이 건다 — DWM 이 레이어드 창의 픽셀 알파를 무시하는 기계에서도 빈 곳이 뚫려 검은 화면이 안 된다.
+  그래서 렌더러는 순수 검정(#000)을 칠하면 안 된다(먹색은 `0, 8, 14`; 얼굴 파내기의 검정은
+  `destination-out` 이라 상관없다).
 
 ### 3.6 클릭은 **어느 모니터에서 눌렀든** 밥이 된다
 

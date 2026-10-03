@@ -140,6 +140,7 @@ sealed class Overlay : Form
     private const int WS_EX_TOOLWINDOW = 0x00000080;
     private const int WS_EX_NOACTIVATE = 0x08000000;
     private const int WS_EX_LAYERED = 0x00080000;
+    private const uint LWA_COLORKEY = 0x00000001;
     private const uint LWA_ALPHA = 0x00000002;
 
     private const int WM_HOTKEY = 0x0312;
@@ -493,18 +494,13 @@ sealed class Overlay : Form
         get
         {
             var p = base.CreateParams;
-            p.ExStyle |= WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
-            // **마지막 수단.** 창 하나만으로 클릭이 안 통과하는 기계가 있으면
-            // SHARK_LAYERED=1 로 레이어드 창으로 만들어 본다. 기본으로 켜지 않는 것은
-            // 레이어드가 합성 경로를 바꿔서 지금 잘 나오는 반투명을 망칠 수 있어서다.
-            if (Layered) p.ExStyle |= WS_EX_LAYERED;
+            // WS_EX_TRANSPARENT 는 WS_EX_LAYERED 와 같이 있어야만 클릭을 통과시킨다. 하나만 걸면
+            // 화면 전체를 덮은 이 창이 클릭을 다 받고, 웹뷰가 포커스까지 가져가 키보드도 죽는다
+            // (치이카와 윈도우판에서 실제로 그렇게 나왔다).
+            p.ExStyle |= WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
             return p;
         }
     }
-
-    /// <summary>SHARK_LAYERED=1 이면 레이어드 창으로 만든다. 위 주석 참고.</summary>
-    private static bool Layered =>
-        Environment.GetEnvironmentVariable("SHARK_LAYERED") == "1";
 
     /// <summary>뜰 때 포커스를 가져가지 않는다. 아래 앱에서 하던 일이 끊기면 안 된다.</summary>
     protected override bool ShowWithoutActivation => true;
@@ -516,7 +512,9 @@ sealed class Overlay : Form
         SetWindowLong(Handle, GWL_EXSTYLE, GetWindowLong(Handle, GWL_EXSTYLE) | WS_EX_TRANSPARENT);
         // 레이어드 창은 알파를 정해 주지 않으면 **아예 안 그려진다.** 255 는 「창 전체에
         // 덧입히는 투명도는 없음」이고, 픽셀마다의 투명은 아래 DWM 이 맡는다.
-        if (Layered) SetLayeredWindowAttributes(Handle, 0, 255, LWA_ALPHA);
+        // 검정 컬러 키는 DWM 이 레이어드 창의 픽셀 알파를 무시하는 기계에서도 빈 곳을 뚫어
+        // 화면이 까맣게 덮이지 않게 하는 안전장치다. 상어의 먹색은 (0,8,14) 라 안 걸린다.
+        SetLayeredWindowAttributes(Handle, 0, 255, LWA_COLORKEY | LWA_ALPHA);
         EnablePerPixelAlpha();
 
         // **등록이 성공해도 시스템이 먼저 가로챌 수 있다.** 성공은 검증이 아니다.
