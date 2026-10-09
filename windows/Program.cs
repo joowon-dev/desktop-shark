@@ -558,7 +558,10 @@ sealed class Overlay : Form
             if (over != cursorOverPanel)
             {
                 cursorOverPanel = over;
-                BeginInvoke(UpdateMousePass);
+                // 메서드 그룹을 그대로 넘기면 안 된다. UpdateMousePass 에 인자(force)가
+                // 생긴 뒤로 Action<bool> 이 되어, 인자 없이 불리는 순간 「Parameter count
+                // mismatch」로 터졌다 — 패널이 영영 클릭을 못 받았다(v1.0.1~1.0.2).
+                BeginInvoke(() => UpdateMousePass());
             }
 
             var message = (int)wParam;

@@ -88,3 +88,12 @@ describe('조용한 재설치가 성립한다', () => {
     expect(iss).toContain('PrivilegesRequired=lowest')
   })
 })
+
+describe('윈도우 셸', () => {
+  // BeginInvoke(메서드) 는 그 메서드의 모양 그대로 Delegate 가 되고, 인자 없이 불린다.
+  // 메서드에 인자가 하나라도 붙으면(기본값이 있어도) 실행 중에 「Parameter count
+  // mismatch」로 터진다 — 컴파일러는 아무 말도 안 한다. 람다로 감싸서 넘긴다.
+  it('BeginInvoke · Invoke 에 메서드 그룹을 그대로 넘기지 않는다', () => {
+    expect(cs).not.toMatch(/\b(?:Begin)?Invoke\(\s*[A-Za-z_][\w.]*\s*\)/)
+  })
+})
