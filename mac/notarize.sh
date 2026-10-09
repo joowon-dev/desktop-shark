@@ -13,7 +13,9 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 IDENTITY="${1:-Developer ID Application: JooWon Koh (7A77FCP9H4)}"
-PROFILE="${2:-webswing-notary}"
+# webswing-notary(Apple ID 앱 암호)는 2026-10 에 401 로 죽었다. 지금은 App Store Connect
+# API 키로 저장한 asc-notary 를 쓴다 — 암호가 만료되지 않는다.
+PROFILE="${2:-asc-notary}"
 APP="dist/mac/Desktop Shark.app"
 ZIP="dist/DesktopShark-mac.zip"
 # zip 은 **자동 업데이트가 받아 가는 것**이고, dmg 는 사람이 처음 설치할 때 받는 것이다.
