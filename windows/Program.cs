@@ -574,7 +574,8 @@ sealed class Overlay : Form
             if (pressed && Feeding)
             {
                 // 훅 안에서는 오래 붙잡으면 안 된다 — 윈도우가 훅을 떼어 버린다.
-                BeginInvoke(() => Send($"window.__sharkFeed && window.__sharkFeed({x}, {y})"));
+                // x·y 는 실제 픽셀이다. 게임은 CSS 픽셀을 받으므로 배율로 나눠서 넘긴다.
+                BeginInvoke(() => Send($"window.__sharkFeed && window.__sharkFeed({x} / (window.devicePixelRatio || 1), {y} / (window.devicePixelRatio || 1))"));
             }
         }
         return CallNextHookEx(mouseHook, code, wParam, lParam);
@@ -726,9 +727,11 @@ sealed class Overlay : Form
             type: 'dex', species: d && d.species, grown: d && d.grown,
             frozen: !!(d && d.frozen), pinnedStage: (d && d.pinnedStage) || 0,
           }),
-          setPanelRect: (r) => window.chrome.webview.postMessage({
-            type: 'panelRect', x: r ? r.x : -1, y: r ? r.y : -1, w: r ? r.w : 0, h: r ? r.h : 0,
-          }),
+          // 렌더러는 CSS 픽셀로 말하고 훅은 실제 픽셀을 준다. 배율이 150% 면 그대로 견줄 때
+          // 패널 자리가 1.5 배 어긋나서, 패널에 커서를 올려도 셸은 「밖이다」로 본다.
+          setPanelRect: (r) => { const s = window.devicePixelRatio || 1; window.chrome.webview.postMessage({
+            type: 'panelRect', x: r ? r.x * s : -1, y: r ? r.y * s : -1, w: r ? r.w * s : 0, h: r ? r.h * s : 0,
+          }) },
         }
         window.addEventListener('error', (e) => window.chrome.webview.postMessage({
           type: 'log', text: `${e.message} (${e.filename}:${e.lineno})`,

@@ -96,4 +96,17 @@ describe('윈도우 셸', () => {
   it('BeginInvoke · Invoke 에 메서드 그룹을 그대로 넘기지 않는다', () => {
     expect(cs).not.toMatch(/\b(?:Begin)?Invoke\(\s*[A-Za-z_][\w.]*\s*\)/)
   })
+
+  // 훅은 **실제 픽셀**을 주고 렌더러는 **CSS 픽셀**로 말한다. 배율 150% 에서 둘을 그대로
+  // 견주면 셸이 생각하는 패널 자리가 실제 패널과 어긋나서, 패널에 커서를 올리면 창이
+  // 마우스를 엉뚱한 데서 받았다 놓았다 하고 패널은 못 누른다. 맥은 둘 다 포인트라 괜찮다.
+  it('패널 네모는 실제 픽셀로 바꿔서 셸에 넘긴다', () => {
+    const bridge = cs.match(/setPanelRect:[\s\S]*?\}\),?\s*\n/)?.[0] ?? ''
+    expect(bridge).toMatch(/devicePixelRatio/)
+  })
+
+  it('클릭 자리는 CSS 픽셀로 바꿔서 게임에 넘긴다', () => {
+    const feed = cs.match(/__sharkFeed\(.*$/m)?.[0] ?? ''
+    expect(feed).toMatch(/devicePixelRatio/)
+  })
 })
